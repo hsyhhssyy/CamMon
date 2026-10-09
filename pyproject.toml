@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75", "cffi>=1.17"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cammon"
+version = "0.1.0"
+description = "Camera recording storage gateway with an SMB1 virtual filesystem"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic-settings>=2.7,<3",
+  "smbprotocol>=1.15,<2", "cffi>=1.17,<3", "cryptography>=44", "psycopg[binary]>=3.2,<4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "httpx>=0.28", "impacket>=0.13", "ruff>=0.11"]
+
+[project.scripts]
+cammon = "cammon.main:main"
+
+[tool.setuptools.packages.find]
+include = ["cammon*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires native services", "smb: real SMB protocol tests", "nfs: real NFS service tests", "postgres: real PostgreSQL service tests"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

@@ -1,0 +1,1 @@
+"""CamMon camera recording gateway."""

@@ -1,0 +1,56 @@
+name: CamMon checks
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.12.23
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg postgresql
+      - run: uv sync --python 3.12 --extra test
+      - run: uv run ruff check cammon tests native scripts
+      - run: uv run pytest -m 'not integration' -q
+      - run: CAMMON_TEST_POSTGRES=1 uv run pytest -m postgres -q
+      - run: cd frontend && npm ci && npm run build
+      - run: cd frontend && npx playwright install --with-deps chromium && npm run test:e2e
+  protocols:
+    name: Protocol tests (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build integration test image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: test
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: cammon:test
+          cache-from: type=gha,scope=cammon-${{ matrix.arch }}
+          cache-to: type=gha,scope=cammon-${{ matrix.arch }},mode=max
+      - run: docker run --rm cammon:test

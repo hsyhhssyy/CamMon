@@ -1,0 +1,28 @@
+services:
+  cammon:
+    build:
+      context: .
+      target: production
+      args:
+        BUILD_JOBS: ${CAMMON_BUILD_JOBS:-2}
+    image: ${CAMMON_IMAGE:-cammon:0.1.0}
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 120s
+    environment:
+      CAMMON_ADMIN_USERNAME: ${CAMMON_ADMIN_USERNAME:-admin}
+      CAMMON_ADMIN_PASSWORD: ${CAMMON_ADMIN_PASSWORD:?请在 .env 中设置至少 12 字符的管理员密码}
+      CAMMON_PORT: ${CAMMON_PORT:-18080}
+      CAMMON_CACHE_LIMIT_BYTES: ${CAMMON_CACHE_LIMIT_BYTES:-10737418240}
+      CAMMON_CACHE_RESERVE_BYTES: ${CAMMON_CACHE_RESERVE_BYTES:-67108864}
+      CAMMON_SUCCESSOR_QUIET_SECONDS: ${CAMMON_SUCCESSOR_QUIET_SECONDS:-10}
+      CAMMON_IDLE_SEAL_SECONDS: ${CAMMON_IDLE_SEAL_SECONDS:-1800}
+      CAMMON_ALLOW_NTLMV1: ${CAMMON_ALLOW_NTLMV1:-false}
+      CAMMON_FFMPEG_THREADS: ${CAMMON_FFMPEG_THREADS:-2}
+      CAMMON_POSTGRES_DSN: ${CAMMON_POSTGRES_DSN:?请设置 PostgreSQL 元数据连接}
+      CAMMON_SECRET_KEY: ${CAMMON_SECRET_KEY:?请设置稳定的 Fernet 凭据加密密钥}
+      CAMMON_POSTGRES_SCHEMA: ${CAMMON_POSTGRES_SCHEMA:-cammon}
+      CAMMON_METADATA_SYNC_SECONDS: ${CAMMON_METADATA_SYNC_SECONDS:-5}
+    tmpfs:
+      - /run/cammon:mode=0755
