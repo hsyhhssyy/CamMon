@@ -1,7 +1,7 @@
 # NAS deployment using the published image; no source checkout or local build required.
 services:
   cammon:
-    image: ${CAMMON_IMAGE:-ghcr.io/hsyhhssyy/cammon:latest}
+    image: ${CAMMON_IMAGE:-ghcr.io/hsyhhssyy/cammon-private:latest}
     pull_policy: missing
     # Listen directly on the NAS IP; host networking does not use ports mappings.
     # SMB: TCP 139/445; NetBIOS discovery: UDP 137/138.

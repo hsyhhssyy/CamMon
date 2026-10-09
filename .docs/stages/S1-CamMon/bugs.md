@@ -137,12 +137,12 @@
 - `标题`：slim 镜像缺少网络名称映射导致 NFS 测试服务启动失败。
 - `发现时间`：2026-10-09。
 - `发现来源`：[首次 Docker CI](https://github.com/hsyhhssyy/CamMon/actions/runs/37926470601)，amd64 / arm64 均出现 78 项通过、4 项 NFS fixture 错误。
-- `当前状态`：`in-progress`，修复已应用，等待云端容器回归。
+- `当前状态`：`fixed`。
 - `归属类型`：`cross-requirement`。
 - `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：Ganesha 不能向 rpcbind 注册 NFS V3 UDP；原 fixture 丢弃 rpcbind 日志，无法直接显示网络服务名解析错误。
 - `处理结果`：运行镜像显式安装 netbase，提供 /etc/services、/etc/protocols 和 /etc/rpc；fixture 保存 rpcbind 日志，并等待 111 端口可用再启动 Ganesha。移除显式 -h 127.0.0.1，避免 Debian rpcbind 1.2.6 重复加入默认 loopback 地址导致 double free。
-- `回归情况`：隔离 chroot 中移除映射时 rpcbind 不监听 IP 端口；使用与镜像相同的 Debian rpcbind / libtirpc 二进制复现显式 loopback 绑定崩溃，去掉 -h 后正常启动。0.1.1 云端回归暴露第二个启动问题，准备 0.1.2 继续全部协议测试。
+- `回归情况`：隔离 chroot 复现网络映射及重复 loopback 绑定问题；v0.1.3 云端 amd64 / arm64 均通过全部 82 项容器测试。
 
 ### S1-BUG-007
 
@@ -150,12 +150,25 @@
 - `标题`：Debian libnfs 4.0.0 无法编码较大 NFSv4 写入请求。
 - `发现时间`：2026-10-09。
 - `发现来源`：[v0.1.2 云端容器回归](https://github.com/hsyhhssyy/CamMon/actions/runs/37929913732)，两种架构均为 80 项通过、2 项 NFSv4 写入失败。
-- `当前状态`：`in-progress`，本机修复通过，等待云端验证。
+- `当前状态`：`fixed`。
 - `归属类型`：`cross-requirement`。
 - `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：NFSv3 正常；NFSv4 上传较大缓冲区返回 Failed to encode COMPOUND4args，源录像仍保留缓存，发布被检查阻止。
 - `处理结果`：独立构建固定 libnfs 5.0.2 并校验源码 SHA256，桥接链接该版本；镜像携带对应动态库及许可证。测试文件增至超过 1 MiB，覆盖完整写入块与尾块。
-- `回归情况`：用 Debian 4.0.0 库在本机复现相同 2 项失败；源码构建 5.0.2 后全部 4 项 NFS 测试通过，云端完整容器回归待执行。
+- `回归情况`：用 Debian 4.0.0 库在本机复现相同 2 项失败；源码构建 5.0.2 后全部 4 项 NFS 测试通过。v0.1.3 云端 amd64 / arm64 均通过 82 项容器测试，包含超过 1 MiB 的 NFSv3/v4.0 上传、校验与重试。
+
+### S1-BUG-008
+
+- `BUG-ID`：`S1-BUG-008`
+- `标题`：已上传的 cammon 包为 Public，未满足私有镜像交付。
+- `发现时间`：2026-10-09。
+- `发现来源`：[v0.1.3 发布后校验](https://github.com/hsyhhssyy/CamMon/actions/runs/37931012436)，应用、协议、镜像上传及多架构检查成功，最终 Private 校验失败。
+- `当前状态`：`in-progress`。
+- `归属类型`：`cross-requirement`。
+- `关联需求`：[S1-RQ-003](requirements/REQ-003-management.md)。
+- `现象 / 影响`：API 预检 404 未能证明包名未占用；cammon:0.1.3 可匿名拉取，包页面显示 Public。GitHub 不允许 Public 包改回 Private。
+- `处理结果`：选择 cammon-private 新包名并同步 Compose、模板及说明；匿名拉取预检补充 API 检查，上传 digest 后再次确认 Private，再生成下载标签。
+- `回归情况`：新包匿名访问拒绝且包页面不存在；发布前后严格校验待 v0.1.4 云端执行。
 
 ## 更新日志
 
