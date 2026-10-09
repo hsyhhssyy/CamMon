@@ -141,8 +141,8 @@
 - `归属类型`：`cross-requirement`。
 - `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：Ganesha 不能向 rpcbind 注册 NFS V3 UDP；原 fixture 丢弃 rpcbind 日志，无法直接显示网络服务名解析错误。
-- `处理结果`：运行镜像显式安装 netbase，提供 /etc/services、/etc/protocols 和 /etc/rpc；fixture 保存 rpcbind 日志，并等待 111 端口可用再启动 Ganesha。
-- `回归情况`：隔离 chroot 中移除映射时 rpcbind 不监听 IP 端口，补回映射后正常绑定；本机 4 项 NFSv3/v4.0 测试通过。准备 0.1.1 修复版本，云端回归待完成。
+- `处理结果`：运行镜像显式安装 netbase，提供 /etc/services、/etc/protocols 和 /etc/rpc；fixture 保存 rpcbind 日志，并等待 111 端口可用再启动 Ganesha。移除显式 -h 127.0.0.1，避免 Debian rpcbind 1.2.6 重复加入默认 loopback 地址导致 double free。
+- `回归情况`：隔离 chroot 中移除映射时 rpcbind 不监听 IP 端口；使用与镜像相同的 Debian rpcbind / libtirpc 二进制复现显式 loopback 绑定崩溃，去掉 -h 后正常启动。0.1.1 云端回归暴露第二个启动问题，准备 0.1.2 继续全部协议测试。
 
 ## 更新日志
 

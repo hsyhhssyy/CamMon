@@ -41,7 +41,9 @@ MEM { Inode_Size = 2097152; }
     rpc_log = rpc_log_path.open("w")
     process = None
     try:
-        rpc = subprocess.Popen(["rpcbind", "-f", "-d", "-h", "127.0.0.1"],
+        # rpcbind 1.2.6 always adds loopback itself; explicitly adding it with
+        # -h duplicates that address and triggers a double free on bookworm.
+        rpc = subprocess.Popen(["rpcbind", "-f", "-d"],
                                stdout=rpc_log, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
