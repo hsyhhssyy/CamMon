@@ -28,12 +28,29 @@ RUN python3 module/register_module.py /build/samba \
 WORKDIR /app
 COPY requirements.lock pyproject.toml ./
 COPY cammon/ cammon/
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir setuptools==84.0.0 -r requirements.lock \
-    && /opt/venv/bin/python cammon/nfs_build.py
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir setuptools==84.0.0 -r requirements.lock
+
+# Bookworm's libnfs 4.0.0 cannot encode larger NFSv4 writes. Compile the tested
+# client separately so upgrading it does not invalidate the Samba build cache.
+FROM native AS nfs-native
+ARG LIBNFS_VERSION=5.0.2
+ARG LIBNFS_SHA256=637e56643b19da9fba98f06847788c4dad308b723156a64748041035dcdf9bd3
+ARG BUILD_JOBS
+RUN apt-get update && apt-get install -y --no-install-recommends cmake \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build/libnfs
+RUN curl -fsSL "https://deb.debian.org/debian/pool/main/libn/libnfs/libnfs_${LIBNFS_VERSION}.orig.tar.gz" -o source.tar.gz \
+    && echo "${LIBNFS_SHA256}  source.tar.gz" | sha256sum -c - \
+    && tar xzf source.tar.gz --strip-components=1 \
+    && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/libnfs \
+    && cmake --build build -j${BUILD_JOBS} && cmake --install build
+WORKDIR /app
+RUN CFLAGS="-I/opt/libnfs/include" LDFLAGS="-L/opt/libnfs/lib -Wl,-rpath,/opt/libnfs/lib" \
+    /opt/venv/bin/python cammon/nfs_build.py
 
 FROM python:3.12-slim-bookworm AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg ca-certificates passwd netbase libnfs13 libgnutls30 libjansson4 libpopt0 libacl1 libattr1 \
+    ffmpeg ca-certificates passwd netbase libgnutls30 libjansson4 libpopt0 libacl1 libattr1 \
     libcap2 libldap-2.5-0 liblmdb0 libtirpc3 liburing2 libdbus-1-3 libicu72 libbsd0 libreadline8 \
     libgssapi-krb5-2 libcrypt1 \
     && rm -rf /var/lib/apt/lists/*
@@ -41,8 +58,10 @@ ENV PATH="/opt/venv/bin:/opt/samba/bin:/opt/samba/sbin:$PATH" \
     PYTHONUNBUFFERED=1 CAMMON_DATA_DIR=/run/cammon/runtime CAMMON_CACHE_DIR=/cache
 WORKDIR /app
 COPY --from=native /opt/samba/ /opt/samba/
-COPY --from=native /opt/venv/ /opt/venv/
-COPY --from=native /app/cammon/ cammon/
+COPY --from=nfs-native /opt/libnfs/lib/ /opt/libnfs/lib/
+COPY --from=nfs-native /build/libnfs/LICENCE-LGPL-2.1.txt /opt/libnfs/COPYING
+COPY --from=nfs-native /opt/venv/ /opt/venv/
+COPY --from=nfs-native /app/cammon/ cammon/
 COPY --from=frontend /ui/dist/ frontend/dist/
 COPY scripts/ scripts/
 EXPOSE 18080 139 445 137/udp 138/udp

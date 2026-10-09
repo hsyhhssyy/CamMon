@@ -59,24 +59,24 @@ docker compose logs -f cammon
 
 镜像默认使用普通容器内的 root 管理 Samba 独立 Unix 账号。Compose 使用 host 网络，无 `privileged`、额外 capability、FUSE 设备或宿主机 SMB/NFS 挂载，也不挂载本地持久数据目录。`/run/cammon` 使用 tmpfs；`/cache` 使用容器临时可写层。不要设置容器为非 root，也不要运行多个 CamMon 实例共用同一 PostgreSQL schema。
 
-构建会从固定的 Samba **4.25.0** 源码同时生成 `smbd`、`nmbd` 和 VFS 模块，并校验源码 SHA256；首次构建需要网络和一定编译时间。`CAMMON_BUILD_JOBS` 默认 2，可按 NAS 内存调整。
+构建会从固定的 Samba **4.25.0** 源码同时生成 `smbd`、`nmbd` 和 VFS 模块，并编译固定版本的 **libnfs 5.0.2**，两份源码均校验 SHA256。libnfs 单独构建并与 CFFI 桥接配套，避免 Debian 旧版客户端无法编码较大 NFSv4 写入。首次构建需要网络和一定编译时间。`CAMMON_BUILD_JOBS` 默认 2，可按 NAS 内存调整。
 
 ## CI 构建与 GHCR 镜像
 
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将项目代码和工作流提交并推送到 GitHub，再发布版本：
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
-镜像地址自动采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.2` 发布 `0.1.2`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.2-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次成功发布的稳定版本。
+镜像地址自动采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.3` 发布 `0.1.3`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.3-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次成功发布的稳定版本。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
 GHCR 登录使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按当前要求保持包为 Private；工作流在发布前检查已有包的可见性，已有公开包会阻止发布，首次创建采用 GHCR 默认私有设置，发布后再次验证 Private。私有包拉取按 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 登录。
 
-NAS 上直接使用私有镜像见前文“使用 GHCR 私有镜像”。已有源码构建部署也可以登录 GHCR 并将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.2`，使用原 Compose 拉取启动：
+NAS 上直接使用私有镜像见前文“使用 GHCR 私有镜像”。已有源码构建部署也可以登录 GHCR 并将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.3`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py

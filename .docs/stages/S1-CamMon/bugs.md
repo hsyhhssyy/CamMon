@@ -144,7 +144,21 @@
 - `处理结果`：运行镜像显式安装 netbase，提供 /etc/services、/etc/protocols 和 /etc/rpc；fixture 保存 rpcbind 日志，并等待 111 端口可用再启动 Ganesha。移除显式 -h 127.0.0.1，避免 Debian rpcbind 1.2.6 重复加入默认 loopback 地址导致 double free。
 - `回归情况`：隔离 chroot 中移除映射时 rpcbind 不监听 IP 端口；使用与镜像相同的 Debian rpcbind / libtirpc 二进制复现显式 loopback 绑定崩溃，去掉 -h 后正常启动。0.1.1 云端回归暴露第二个启动问题，准备 0.1.2 继续全部协议测试。
 
+### S1-BUG-007
+
+- `BUG-ID`：`S1-BUG-007`
+- `标题`：Debian libnfs 4.0.0 无法编码较大 NFSv4 写入请求。
+- `发现时间`：2026-10-09。
+- `发现来源`：[v0.1.2 云端容器回归](https://github.com/hsyhhssyy/CamMon/actions/runs/37929913732)，两种架构均为 80 项通过、2 项 NFSv4 写入失败。
+- `当前状态`：`in-progress`，本机修复通过，等待云端验证。
+- `归属类型`：`cross-requirement`。
+- `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
+- `现象 / 影响`：NFSv3 正常；NFSv4 上传较大缓冲区返回 Failed to encode COMPOUND4args，源录像仍保留缓存，发布被检查阻止。
+- `处理结果`：独立构建固定 libnfs 5.0.2 并校验源码 SHA256，桥接链接该版本；镜像携带对应动态库及许可证。测试文件增至超过 1 MiB，覆盖完整写入块与尾块。
+- `回归情况`：用 Debian 4.0.0 库在本机复现相同 2 项失败；源码构建 5.0.2 后全部 4 项 NFS 测试通过，云端完整容器回归待执行。
+
 ## 更新日志
 
 - 2026-10-08：记录并修复 5 类原生协议、恢复和并发链路问题。
 - 2026-10-09：登记首个云端容器回归发现的网络基础包缺失，保持协议测试启用并修复部署依赖。
+- 2026-10-09：NFS 服务启动修正后发现旧版 libnfs 写入编码限制，固定升级至已验证的源码版本并增加大块上传回归。

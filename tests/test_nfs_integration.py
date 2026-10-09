@@ -86,7 +86,9 @@ MEM { Inode_Size = 2097152; }
 def test_nfs_real_upload_verify_rename_read_and_delete(nfs_server, tmp_path, version):
     backend = NFSBackend(dict(address=nfs_server, nfs_version=version, uid=0, gid=0), timeout=10)
     source = tmp_path / "input.mp4"
-    source.write_bytes(bytes(range(256)) * 1024)
+    # Exercise full-size writes and a second chunk, beyond libnfs 4's small
+    # NFSv4 encoding buffer and within the test MEM export's 2 MiB limit.
+    source.write_bytes(bytes(range(256)) * 4097)
     temporary = f"version{version}/nested/input.cammon-part"
     destination = f"version{version}/nested/input.mp4"
     backend.upload(temporary, source)
