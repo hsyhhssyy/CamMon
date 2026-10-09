@@ -1,5 +1,5 @@
 name: Publish to GHCR
-# A newly created GHCR package is private by default; keep its visibility private.
+# Verify actual GHCR privacy before publishing download tags.
 
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
             --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "$package_url")
           case "$status" in
             200) jq -e '.visibility == "private"' "$RUNNER_TEMP/package.json" ;;
-            404) echo 'New GHCR packages are created private by default.' ;;
+            404) echo 'No accessible package found; newly uploaded digests must pass the privacy check.' ;;
             *) echo "::error::Unable to check GHCR package visibility (HTTP $status)."; exit 1 ;;
           esac
           # A repository token can receive 404 for an existing, unlinked public

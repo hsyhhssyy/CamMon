@@ -74,7 +74,7 @@ git push origin v0.1.4
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
-GHCR 登录使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按当前要求保持包为 Private；工作流在发布前检查已有包的可见性，已有公开包会阻止发布，首次创建采用 GHCR 默认私有设置，上传 digest 后先验证 Private 再创建下载标签，发布后再次验证 Private。私有包拉取按 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 登录。
+GHCR 登录使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按当前要求保持包为 Private；工作流在发布前检查已有包的可见性，已有公开包会阻止发布，首次上传后检查实际可见性，上传 digest 后先验证 Private 再创建下载标签，发布后再次验证 Private。私有包拉取按 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 登录。
 
 NAS 上直接使用私有镜像见前文“使用 GHCR 私有镜像”。已有源码构建部署也可以登录 GHCR 并将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon-private:0.1.4`，使用原 Compose 拉取启动：
 
@@ -216,7 +216,7 @@ PostgreSQL 集成测试需要安装服务端二进制，使用隔离的临时数
 
 原生测试会创建并清理临时 Unix 摄像机账号、启动独立 Samba 和 Ganesha MEM 导出，需要测试机的 UDP 137/138、TCP 445、111、2049 空闲。Ganesha 仅用于测试，运行产品不需要 NFS 服务端、rpcbind 或系统挂载。
 
-目前 82 项 Python 测试和浏览器流程通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 发现、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。当前开发环境没有 Docker daemon，镜像构建及目标 NAS 的摄像机实机验收仍待部署环境执行；CI 已配置完整镜像构建与容器内协议测试。
+目前 82 项 Python 测试和浏览器流程通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 发现、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。GitHub Actions 已在 amd64 / arm64 各通过全部 82 项容器测试及生产镜像构建。当前 GHCR 新包实际返回 Public，私有检查阻止 v0.1.4 下载标签发布，私有镜像尚未交付；需确定私有发布仓库方式。目标 NAS 的容器运行及摄像机实机验收仍待执行。
 
 需求和验收记录见 [Stage S1](.docs/stages/S1-CamMon/README.md)。Samba 与 VFS 模块采用 GPL-3.0-or-later，许可证见 [native/COPYING](native/COPYING)。
 
