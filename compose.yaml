@@ -5,7 +5,7 @@ services:
       target: production
       args:
         BUILD_JOBS: ${CAMMON_BUILD_JOBS:-2}
-    image: ${CAMMON_IMAGE:-cammon:0.1.0}
+    image: ${CAMMON_IMAGE:-cammon:0.1.1}
     network_mode: host
     init: true
     restart: unless-stopped

@@ -37,10 +37,23 @@ EXPORT { Export_Id = 77; Path = /cammon; Pseudo = /cammon; Protocols = 3,4; Acce
          Squash = No_Root_Squash; SecType = sys; FSAL { Name = MEM; } }
 MEM { Inode_Size = 2097152; }
 """.replace("EXTRA", extra))
-    rpc = subprocess.Popen(["rpcbind", "-f", "-w", "-h", "127.0.0.1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    rpc_log_path = directory / "rpcbind.log"
+    rpc_log = rpc_log_path.open("w")
     process = None
     try:
-        time.sleep(0.3)
+        rpc = subprocess.Popen(["rpcbind", "-f", "-d", "-h", "127.0.0.1"],
+                               stdout=rpc_log, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if rpc.poll() is not None:
+                pytest.fail("rpcbind exited before startup:\n" + rpc_log_path.read_text())
+            try:
+                with socket.create_connection(("127.0.0.1", 111), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail("rpcbind did not open RPC port:\n" + rpc_log_path.read_text())
         process = subprocess.Popen(["ganesha.nfsd", "-F", "-f", str(config), "-L", str(directory / "server.log"),
                                     "-p", str(directory / "server.pid")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.time() + 15
@@ -64,6 +77,7 @@ MEM { Inode_Size = 2097152; }
                 except subprocess.TimeoutExpired:
                     child.kill()
                     child.wait()
+        rpc_log.close()
 
 
 @pytest.mark.parametrize("version", [3, 4])

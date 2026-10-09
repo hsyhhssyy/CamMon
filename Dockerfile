@@ -33,7 +33,7 @@ RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir setupto
 
 FROM python:3.12-slim-bookworm AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg ca-certificates passwd libnfs13 libgnutls30 libjansson4 libpopt0 libacl1 libattr1 \
+    ffmpeg ca-certificates passwd netbase libnfs13 libgnutls30 libjansson4 libpopt0 libacl1 libattr1 \
     libcap2 libldap-2.5-0 liblmdb0 libtirpc3 liburing2 libdbus-1-3 libicu72 libbsd0 libreadline8 \
     libgssapi-krb5-2 libcrypt1 \
     && rm -rf /var/lib/apt/lists/*

@@ -66,17 +66,17 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将项目代码和工作流提交并推送到 GitHub，再发布版本：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-镜像地址自动采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.0` 发布 `0.1.0`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.0-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次成功发布的稳定版本。
+镜像地址自动采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.1` 发布 `0.1.1`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.1-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次成功发布的稳定版本。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
 GHCR 登录使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按当前要求保持包为 Private；工作流在发布前检查已有包的可见性，已有公开包会阻止发布，首次创建采用 GHCR 默认私有设置，发布后再次验证 Private。私有包拉取按 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 登录。
 
-NAS 上直接使用私有镜像见前文“使用 GHCR 私有镜像”。已有源码构建部署也可以登录 GHCR 并将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.0`，使用原 Compose 拉取启动：
+NAS 上直接使用私有镜像见前文“使用 GHCR 私有镜像”。已有源码构建部署也可以登录 GHCR 并将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.1`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py

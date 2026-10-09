@@ -62,6 +62,7 @@
 | S1-BUG-003 | 旧版 libnfs 的 NFSv4 上传重试 EEXIST | 2026-10-08 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-002 |
 | S1-BUG-004 | 远程删除与停机占用摄像机全局锁 | 2026-10-08 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-002 |
 | S1-BUG-005 | 旧版 libnfs 的 NFSv4 客户端身份冲突 | 2026-10-08 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
+| S1-BUG-006 | slim 镜像缺少网络名称映射导致 NFS 测试服务启动失败 | 2026-10-09 | in-progress | cross-requirement | S1-RQ-001 / S1-RQ-003 |
 
 ## 条目明细
 
@@ -130,6 +131,20 @@
 - `处理结果`：每个 NFSv4 上下文设置独立 UUID 客户端身份，保留读取和校验连接各自的状态。
 - `回归情况`：NFSv3/v4.0 均通过保持读取句柄、新建 stat/完整 SHA256 连接、继续范围读取的测试。
 
+### S1-BUG-006
+
+- `BUG-ID`：`S1-BUG-006`
+- `标题`：slim 镜像缺少网络名称映射导致 NFS 测试服务启动失败。
+- `发现时间`：2026-10-09。
+- `发现来源`：[首次 Docker CI](https://github.com/hsyhhssyy/CamMon/actions/runs/37926470601)，amd64 / arm64 均出现 78 项通过、4 项 NFS fixture 错误。
+- `当前状态`：`in-progress`，修复已应用，等待云端容器回归。
+- `归属类型`：`cross-requirement`。
+- `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
+- `现象 / 影响`：Ganesha 不能向 rpcbind 注册 NFS V3 UDP；原 fixture 丢弃 rpcbind 日志，无法直接显示网络服务名解析错误。
+- `处理结果`：运行镜像显式安装 netbase，提供 /etc/services、/etc/protocols 和 /etc/rpc；fixture 保存 rpcbind 日志，并等待 111 端口可用再启动 Ganesha。
+- `回归情况`：隔离 chroot 中移除映射时 rpcbind 不监听 IP 端口，补回映射后正常绑定；本机 4 项 NFSv3/v4.0 测试通过。准备 0.1.1 修复版本，云端回归待完成。
+
 ## 更新日志
 
 - 2026-10-08：记录并修复 5 类原生协议、恢复和并发链路问题。
+- 2026-10-09：登记首个云端容器回归发现的网络基础包缺失，保持协议测试启用并修复部署依赖。

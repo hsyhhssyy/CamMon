@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cammon"
-version = "0.1.0"
+version = "0.1.1"
 description = "Camera recording storage gateway with an SMB1 virtual filesystem"
 requires-python = ">=3.12"
 dependencies = [
