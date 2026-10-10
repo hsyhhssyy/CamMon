@@ -72,7 +72,7 @@
 
 - 当前状态：`in-progress`。
 - 当前目标：管理、统计下载和 NAS Docker 部署。
-- 当前已知进展：用户接受公开镜像，cammon:0.1.3 及 latest 已验证匿名访问 HTTP 200、相同 digest 和 amd64 / arm64 支持。NAS Compose、空凭据模板与文档已改为公开的固定版本，CI 同步改为 Public 校验。NAS 实机验收待完成。
+- 当前已知进展：用户接受公开镜像，cammon:0.1.3 及 latest 已验证匿名访问 HTTP 200、相同 digest 和 amd64 / arm64 支持。NAS Compose、空凭据模板与文档已改为公开的固定版本；公开 CI 发布已全部通过，edge 和对应 SHA 标签完成双架构发布及匿名验证。NAS 实机验收待完成。
 - 下一步动作：现场部署验收或负载观察；验收边界见待确认问题。
 
 ## 功能拆解 / 实施拆解
@@ -136,6 +136,15 @@
 - 实际结果：两个清单 HTTP 200，digest 同为 sha256:0aa69430485567d7caf69c3e5a8331d029ca7c09a472a6ab6ecd0e24de9350ca，含 linux/amd64 / linux/arm64。独立 Compose 解析、覆盖及缺失项验证、actionlint 通过；未在目标 NAS 启动服务。
 - 证据：[公开镜像](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)、[Compose](../../../../compose.ghcr.yaml)、[环境模板](../../../../.env.ghcr.example)、[发布流程](../../../../.github/workflows/publish.yml)。
 
+### 2026-10-10 公开 CI 完整发布验收
+
+- 时间：2026-10-10。
+- 场景：提交公开部署配置后，验证完整云端检查、生产构建、多架构发布和匿名访问。
+- 操作步骤：在 main 的 0b6ff76c9effcc1940700b0ef154faf6135f906d 提交手动运行发布工作流，检查全部任务及最终 Public / 匿名清单验证结果。
+- 预期结果：应用检查、两种架构协议检查和生产构建全部成功后，发布 edge 与 SHA 标签；包保持公开，匿名清单包含 linux/amd64 / linux/arm64。
+- 实际结果：全部七个任务成功，amd64 / arm64 各通过 82 项容器测试；发布 edge 和 sha-0b6ff76c9effcc1940700b0ef154faf6135f906d，清单 digest 为 sha256:289f7ce5ebe26e779e99726706c1c15c1c5ca44b3a90c728905d11b41478d71b，Public 及匿名双架构验证通过。未更新 NAS 默认 0.1.3 标签，未将目标 NAS 或摄像机现场验收计为通过。
+- 证据：[成功的公开发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38017078122)、[公开镜像](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)、[发布流程](../../../../.github/workflows/publish.yml)。
+
 ## bug / 修复记录
 
 健康检查地址已与 /healthz 对齐；缓存和上传错误在页面显示。
@@ -190,3 +199,4 @@ NFSv4 较大写入的旧版客户端编码失败见 [S1-BUG-007](../bugs.md)：�
 - 2026-10-09：v0.1.3 两种架构均通过全部 82 项协议与应用测试，但发布后发现包为 Public；按用户要求改用 cammon-private 并同步 NAS 配置，准备 v0.1.4 验证真实 Private 状态。
 - 2026-10-09：v0.1.4 仍被自动设为 Public，发布标签被拦截；源码、CI 构建与密钥保护完成，私有镜像交付等待仓库发布方式选择。
 - 2026-10-10：用户接受公开镜像，匿名双架构清单已验证；更新 NAS Compose、部署说明和公开发布工作流，私有发布中断关闭，状态仍待 NAS 实机验收。
+- 2026-10-10：公开发布 CI 全部七个任务成功，edge / SHA 双架构镜像及匿名访问验证完成；NAS 默认固定 0.1.3，现场验收状态不变。

@@ -153,5 +153,5 @@
 
 1. 自动化验收结论与 NAS/摄像机现场验收分别记录。
 2. 已验证：82 项 Python 测试（含 PostgreSQL 内存断线服务、冷启动和 SMB1 凭据重建）、1 项 Playwright 操作测试、前端生产构建、Ruff、Compose 解析及端口预检。
-3. 已验证：GitHub Actions 在 amd64 / arm64 各通过 82 项容器测试及生产镜像构建；管理端检查通过。2026-10-10 按最新要求使用公开镜像，cammon:0.1.3 和 latest 可匿名访问，清单包含两种架构。
+3. 已验证：GitHub Actions 在 amd64 / arm64 各通过 82 项容器测试及生产镜像构建；管理端检查通过。2026-10-10 按最新要求使用公开镜像，cammon:0.1.3 和 latest 可匿名访问，清单包含两种架构；[公开发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38017078122)全部成功，edge / SHA 发布及匿名验证通过。
 4. 未验证：目标 NAS 的容器运行、摄像机实机；开发环境没有 Docker daemon，云端已执行镜像构建和协议测试。
