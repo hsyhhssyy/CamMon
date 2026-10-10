@@ -62,7 +62,9 @@
 | S1-BUG-003 | 旧版 libnfs 的 NFSv4 上传重试 EEXIST | 2026-10-08 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-002 |
 | S1-BUG-004 | 远程删除与停机占用摄像机全局锁 | 2026-10-08 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-002 |
 | S1-BUG-005 | 旧版 libnfs 的 NFSv4 客户端身份冲突 | 2026-10-08 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
-| S1-BUG-006 | slim 镜像缺少网络名称映射导致 NFS 测试服务启动失败 | 2026-10-09 | in-progress | cross-requirement | S1-RQ-001 / S1-RQ-003 |
+| S1-BUG-006 | slim 镜像缺少网络名称映射导致 NFS 测试服务启动失败 | 2026-10-09 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
+| S1-BUG-007 | 旧版 libnfs 无法编码较大 NFSv4 写入 | 2026-10-09 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
+| S1-BUG-008 | GHCR Public 状态未满足原私有交付要求 | 2026-10-09 | closed | cross-requirement | S1-RQ-003 |
 
 ## 条目明细
 
@@ -163,15 +165,17 @@
 - `标题`：已上传的 cammon 包为 Public，未满足私有镜像交付。
 - `发现时间`：2026-10-09。
 - `发现来源`：[v0.1.3 发布后校验](https://github.com/hsyhhssyy/CamMon/actions/runs/37931012436)，应用、协议、镜像上传及多架构检查成功，最终 Private 校验失败。
-- `当前状态`：`in-progress`。
+- `当前状态`：`closed`，2026-10-10 用户撤销私有镜像要求，接受公开镜像。
 - `归属类型`：`cross-requirement`。
 - `关联需求`：[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：API 预检 404 未能证明包名未占用；cammon:0.1.3 可匿名拉取，包页面显示 Public。GitHub 不允许 Public 包改回 Private。
 - `处理结果`：选择 cammon-private 新包名并同步 Compose、模板及说明；匿名拉取预检补充 API 检查，上传 digest 后再次确认 Private，再生成下载标签。
 - `回归情况`：v0.1.4 应用、amd64 / arm64 的全部 82 项容器测试和生产上传通过；新包上传后 API 实际返回 Public，版本标签发布被阻止。两个新包均出现该行为，需确认独立私有发布仓库或现有仓库改私有的方式，未将发布判为成功。
+- `关闭结果`：2026-10-10 用户明确接受公开镜像；cammon:0.1.3 和 latest 已验证匿名 HTTP 200、相同 digest 和双架构支持，部署地址与 CI 检查改回 Public。
 
 ## 更新日志
 
 - 2026-10-08：记录并修复 5 类原生协议、恢复和并发链路问题。
 - 2026-10-09：登记首个云端容器回归发现的网络基础包缺失，保持协议测试启用并修复部署依赖。
 - 2026-10-09：NFS 服务启动修正后发现旧版 libnfs 写入编码限制，固定升级至已验证的源码版本并增加大块上传回归。
+- 2026-10-10：用户接受公开镜像并请求 NAS Compose，验证既有镜像可匿名访问，关闭私有交付中断。

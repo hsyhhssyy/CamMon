@@ -66,13 +66,13 @@
 4. Docker host 网络，管理默认 18080；Samba 状态与虚拟目录用 tmpfs，元数据及凭据保存 PostgreSQL，录像缓存允许重启丢失；启动检查具体端口冲突。
 5. 第一版文件列表和下载；已有数据禁止直接更换后端地址，不自动迁移。
 6. GitHub Actions 在版本标签推送或手动触发时发布 GHCR 镜像，复用全部检查和编译缓存；amd64 / arm64 原生测试与构建，发布 production 多架构镜像。普通分支与 PR 只执行检查。
-7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 私有镜像，无本地 build；先登录 GHCR，host 网络直接监听 TCP 139/445/18080、UDP 137/138，管理端口可配置。按用户最新要求不公开镜像，工作流发布前后检查可见性。
+7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.3，host 网络直接监听 TCP 139/445/18080、UDP 137/138，管理端口可配置。CI 按用户最新要求验证 Public 及匿名镜像访问。
 
 ## 当前状态视图
 
 - 当前状态：`in-progress`。
 - 当前目标：管理、统计下载和 NAS Docker 部署。
-- 当前已知进展：v0.1.4 云端应用及两个架构的全部 82 项容器测试通过，生产镜像已上传；新包仍被设为 Public，下载标签发布被私有校验阻止。等待用户选择独立私有发布仓库或现有仓库改私有。NAS 实机验收待完成。
+- 当前已知进展：用户接受公开镜像，cammon:0.1.3 及 latest 已验证匿名访问 HTTP 200、相同 digest 和 amd64 / arm64 支持。NAS Compose、空凭据模板与文档已改为公开的固定版本，CI 同步改为 Public 校验。NAS 实机验收待完成。
 - 下一步动作：现场部署验收或负载观察；验收边界见待确认问题。
 
 ## 功能拆解 / 实施拆解
@@ -127,6 +127,15 @@
 - 实际结果：82 项 Python 测试及 1 项浏览器测试通过，前端构建、Ruff、actionlint 和忽略规则通过。GitHub 连接为只读且 gh 未登录，远程推送和镜像创建尚未完成；不把本地准备当作远程发布验收。
 - 证据：[发布工作流](../../../../.github/workflows/publish.yml)、[忽略规则](../../../../.gitignore)、[Docker 忽略规则](../../../../.dockerignore)、[测试目录](../../../../tests)。本地 .env 不进入版本库，也不记录实际密钥。
 
+### 2026-10-10 公开镜像与 NAS Compose 校验
+
+- 时间：2026-10-10。
+- 场景：用户接受公开镜像，使用现有镜像直接部署 NAS。
+- 操作步骤：匿名读取 cammon:0.1.3 / latest 的 OCI 清单；在隔离目录只放 Compose 与环境模板，使用测试凭据解析配置，检查版本、host 网络、tmpfs、无持久卷及 build，验证 digest / 端口覆盖和三个必填项；运行 actionlint。
+- 预期结果：双架构镜像可匿名访问；NAS 配置无需源码、GHCR 登录或持久化 /data；部署密钥只在本地配置中。
+- 实际结果：两个清单 HTTP 200，digest 同为 sha256:0aa69430485567d7caf69c3e5a8331d029ca7c09a472a6ab6ecd0e24de9350ca，含 linux/amd64 / linux/arm64。独立 Compose 解析、覆盖及缺失项验证、actionlint 通过；未在目标 NAS 启动服务。
+- 证据：[公开镜像](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)、[Compose](../../../../compose.ghcr.yaml)、[环境模板](../../../../.env.ghcr.example)、[发布流程](../../../../.github/workflows/publish.yml)。
+
 ## bug / 修复记录
 
 健康检查地址已与 /healthz 对齐；缓存和上传错误在页面显示。
@@ -135,7 +144,7 @@
 
 NFSv4 较大写入的旧版客户端编码失败见 [S1-BUG-007](../bugs.md)：镜像固定构建 libnfs 5.0.2，源码和动态库配套，不缩小上传块或跳过 NFSv4 检查。
 
-私有包交付见 [S1-BUG-008](../bugs.md)：cammon Public 包不能改回 Private，改用新的 cammon-private 地址；检查匿名权限和实际可见性后才发布标签。
+镜像发布中断见 [S1-BUG-008](../bugs.md)：2026-10-10 用户接受公开镜像后关闭私有交付事项；恢复 cammon 地址，验证公开镜像并提供 NAS Compose。
 
 ## 中断与恢复记录
 
@@ -157,6 +166,12 @@ NFSv4 较大写入的旧版客户端编码失败见 [S1-BUG-007](../bugs.md)：�
 4. 新增独立 GHCR Compose 与空凭据模板，默认拉取 latest；NAS 使用 host 网络开放协议端口，不创建持久化数据卷。当前匿名 GHCR 访问返回 403，尚未确认镜像公开可用，部署以完成 CI 发布和 Public 设置为前提。
 5. 用户随后要求提交推送并创建私有 GHCR 镜像，替代此前公开镜像部署口径。NAS 需要登录读取私有包，CI 发布前后验证包为 Private；本地生成 Fernet 密钥并写入被 Git/Docker 忽略的 .env，权限 0600。
 
+### 2026-10-10
+
+1. 用户接受公开镜像，撤销私有发布要求，无需新增仓库或改变源码仓库可见性。
+2. 验证 cammon:0.1.3 和 latest 的匿名清单；NAS Compose 固定到已发布的 0.1.3，并保留 CAMMON_IMAGE 覆盖。
+3. 管理员密码、PostgreSQL DSN 和稳定的加密密钥仍通过本地 .env 注入；不创建持久数据卷。
+
 ## 待确认问题
 
 1. 目标 NAS 的 Docker 构建、端口、临时空间和内存可用性。
@@ -174,3 +189,4 @@ NFSv4 较大写入的旧版客户端编码失败见 [S1-BUG-007](../bugs.md)：�
 - 2026-10-09：v0.1.2 已通过 NFSv3，但旧版 libnfs 的 NFSv4 写入编码失败；固定源码升级客户端并本机验证，准备 v0.1.3 云端回归。
 - 2026-10-09：v0.1.3 两种架构均通过全部 82 项协议与应用测试，但发布后发现包为 Public；按用户要求改用 cammon-private 并同步 NAS 配置，准备 v0.1.4 验证真实 Private 状态。
 - 2026-10-09：v0.1.4 仍被自动设为 Public，发布标签被拦截；源码、CI 构建与密钥保护完成，私有镜像交付等待仓库发布方式选择。
+- 2026-10-10：用户接受公开镜像，匿名双架构清单已验证；更新 NAS Compose、部署说明和公开发布工作流，私有发布中断关闭，状态仍待 NAS 实机验收。

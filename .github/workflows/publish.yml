@@ -1,5 +1,5 @@
 name: Publish to GHCR
-# Verify actual GHCR privacy before publishing download tags.
+# Publish public images and verify anonymous access to the release manifest.
 
 on:
   push:
@@ -30,8 +30,8 @@ jobs:
     steps:
       - name: Set lowercase image name
         id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-private" >> "$GITHUB_OUTPUT"
-      - name: Require a private package
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Require a public package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_NAME: ${{ steps.image.outputs.name }}
@@ -40,18 +40,10 @@ jobs:
           status=$(curl --silent --show-error --output "$RUNNER_TEMP/package.json" --write-out '%{http_code}' \
             --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "$package_url")
           case "$status" in
-            200) jq -e '.visibility == "private"' "$RUNNER_TEMP/package.json" ;;
-            404) echo 'No accessible package found; newly uploaded digests must pass the privacy check.' ;;
+            200) jq -e '.visibility == "public"' "$RUNNER_TEMP/package.json" ;;
+            404) echo 'Newly uploaded digests must pass the public visibility check.' ;;
             *) echo "::error::Unable to check GHCR package visibility (HTTP $status)."; exit 1 ;;
           esac
-          # A repository token can receive 404 for an existing, unlinked public
-          # package. Independently reject packages that allow anonymous pulls.
-          anonymous_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:$GITHUB_REPOSITORY_OWNER/${IMAGE_NAME##*/}:pull")
-          if [[ "$anonymous_status" == 200 ]]; then
-            echo '::error::This package permits anonymous pulls; choose an unused private package name.'
-            exit 1
-          fi
       - name: Generate image tags and labels
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -119,7 +111,7 @@ jobs:
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           mkdir -p "$RUNNER_TEMP/digests"
           touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
-      - name: Verify privacy before publishing tags
+      - name: Verify public visibility before publishing tags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_NAME: ${{ needs.metadata.outputs.image }}
@@ -129,7 +121,7 @@ jobs:
             --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' \
             --output "$RUNNER_TEMP/package.json" "$package_url"
           jq '{name, visibility, version_count}' "$RUNNER_TEMP/package.json"
-          jq -e '.visibility == "private"' "$RUNNER_TEMP/package.json"
+          jq -e '.visibility == "public"' "$RUNNER_TEMP/package.json"
       - name: Upload image digest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -182,15 +174,29 @@ jobs:
             jq -e '[.manifests[].platform | select(.os == "linux") | .os + "/" + .architecture] | sort == ["linux/amd64", "linux/arm64"]'
           printf 'Published image: `%s`\n\n' "$IMAGE_NAME" >> "$GITHUB_STEP_SUMMARY"
           printf -- '- `%s`\n' "${image_tags[@]}" >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify package remains private
+      - name: Verify public package and anonymous pull
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_NAME: ${{ needs.metadata.outputs.image }}
+          IMAGE_TAGS: ${{ needs.metadata.outputs.tags }}
         run: |
           package_url="$GITHUB_API_URL/users/$GITHUB_REPOSITORY_OWNER/packages/container/${IMAGE_NAME##*/}"
           curl --fail --silent --show-error --retry 4 --retry-delay 3 --retry-all-errors \
             --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' \
             --output "$RUNNER_TEMP/package.json" "$package_url"
-          jq -e '.visibility == "private"' "$RUNNER_TEMP/package.json"
+          jq -e '.visibility == "public"' "$RUNNER_TEMP/package.json"
           jq '{name, visibility, version_count}' "$RUNNER_TEMP/package.json"
-          printf '\nPackage visibility: Private\n' >> "$GITHUB_STEP_SUMMARY"
+          repository="${IMAGE_NAME#ghcr.io/}"
+          curl --fail --silent --show-error --retry 4 --retry-delay 3 --retry-all-errors \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$repository:pull" \
+            --output "$RUNNER_TEMP/anonymous-token.json"
+          registry_token=$(jq -er '.token // .access_token' "$RUNNER_TEMP/anonymous-token.json")
+          mapfile -t image_tags <<< "$IMAGE_TAGS"
+          curl --fail --silent --show-error --retry 4 --retry-delay 3 --retry-all-errors \
+            --header "Authorization: Bearer $registry_token" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/$repository/manifests/${image_tags[0]##*:}" \
+            --output "$RUNNER_TEMP/anonymous-manifest.json"
+          jq -e '[.manifests[].platform | select(.os == "linux") | .os + "/" + .architecture] | sort == ["linux/amd64", "linux/arm64"]' \
+            "$RUNNER_TEMP/anonymous-manifest.json"
+          printf '\nPackage visibility: Public; anonymous manifest access verified\n' >> "$GITHUB_STEP_SUMMARY"

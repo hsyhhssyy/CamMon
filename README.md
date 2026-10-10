@@ -10,16 +10,16 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 需要 Linux NAS、Docker Compose、可用的 PostgreSQL、足够的临时录像空间和运行内存，以及独占的 UDP 137/138、TCP 139/445。NAS 原有 SMB 服务使用同样端口时，应先由管理员调整 NAS 服务。CamMon 会报告冲突端口，并保留管理页面用于查看错误。
 
-### 使用 GHCR 私有镜像
+### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建。镜像通过发布工作流生成并保持 Private。NAS 先用有此包读取权限的 GitHub 账号登录 GHCR，登录密码使用具有 `read:packages` 权限的 classic PAT。默认使用 `ghcr.io/hsyhhssyy/cammon-private:latest`，手动 CI 发布的镜像使用 `edge`，也可在 `.env` 中指定已发布的版本或 digest。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用已发布的 `ghcr.io/hsyhhssyy/cammon:0.1.3`，支持 `linux/amd64` 和 `linux/arm64`。2026-10-10 已验证 `0.1.3` 与 `latest` 均可匿名读取，且指向相同的多架构镜像；镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
-cp .env.ghcr.example .env
-docker login ghcr.io -u hsyhhssyy
-# 在交互提示中输入 classic PAT；这与下面生成的应用加密密钥不同。
-# 生成密钥：这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon-private:latest \
+test -f .env || cp .env.ghcr.example .env
+chmod 600 .env
+# 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
+# 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.3 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -63,20 +63,20 @@ docker compose logs -f cammon
 
 ## CI 构建与 GHCR 镜像
 
-[Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将项目代码和工作流提交并推送到 GitHub，再发布版本：
+[Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
-镜像地址采用小写仓库名加 `-private` 后缀，当前为 `ghcr.io/hsyhhssyy/cammon-private`。`v0.1.4` 发布 `0.1.4`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.4-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次成功发布的稳定版本。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.5` 发布 `0.1.5`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.5-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
-GHCR 登录使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按当前要求保持包为 Private；工作流在发布前检查已有包的可见性，已有公开包会阻止发布，首次上传后检查实际可见性，上传 digest 后先验证 Private 再创建下载标签，发布后再次验证 Private。私有包拉取按 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 登录。
+CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用私有镜像见前文“使用 GHCR 私有镜像”。已有源码构建部署也可以登录 GHCR 并将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon-private:0.1.4`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.3`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py
@@ -216,7 +216,7 @@ PostgreSQL 集成测试需要安装服务端二进制，使用隔离的临时数
 
 原生测试会创建并清理临时 Unix 摄像机账号、启动独立 Samba 和 Ganesha MEM 导出，需要测试机的 UDP 137/138、TCP 445、111、2049 空闲。Ganesha 仅用于测试，运行产品不需要 NFS 服务端、rpcbind 或系统挂载。
 
-目前 82 项 Python 测试和浏览器流程通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 发现、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。GitHub Actions 已在 amd64 / arm64 各通过全部 82 项容器测试及生产镜像构建。当前 GHCR 新包实际返回 Public，私有检查阻止 v0.1.4 下载标签发布，私有镜像尚未交付；需确定私有发布仓库方式。目标 NAS 的容器运行及摄像机实机验收仍待执行。
+目前 82 项 Python 测试和浏览器流程通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 发现、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。GitHub Actions 已在 amd64 / arm64 各通过全部 82 项容器测试及生产镜像构建。按最新要求使用公开镜像，`cammon:0.1.3` 及 `latest` 的匿名访问和双架构清单已验证；目标 NAS 的容器运行及摄像机实机验收仍待执行。
 
 需求和验收记录见 [Stage S1](.docs/stages/S1-CamMon/README.md)。Samba 与 VFS 模块采用 GPL-3.0-or-later，许可证见 [native/COPYING](native/COPYING)。
 
