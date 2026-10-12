@@ -9,9 +9,12 @@ import subprocess
 log = logging.getLogger(__name__)
 
 
-def check_ports() -> list[str]:
+def check_ports(*, include_netbios: bool = True) -> list[str]:
     conflicts = []
-    for transport, ports in ((socket.SOCK_DGRAM, (137, 138)), (socket.SOCK_STREAM, (139, 445))):
+    transports = [(socket.SOCK_STREAM, (139, 445))]
+    if include_netbios:
+        transports.append((socket.SOCK_DGRAM, (137, 138)))
+    for transport, ports in transports:
         for port in ports:
             with socket.socket(socket.AF_INET, transport) as probe:
                 try:
@@ -27,6 +30,7 @@ class SambaManager:
         self.settings = gateway.settings
         self.processes: list[subprocess.Popen] = []
         self.group_id = 28000
+        self.discovery_mode = "pending"
 
     def prepare(self):
         if os.geteuid() != 0:
@@ -139,15 +143,34 @@ class SambaManager:
                 process.send_signal(signal.SIGHUP)
 
     def start(self):
-        conflicts = check_ports()
-        if conflicts:
-            raise RuntimeError("NAS 上的 SMB/发现端口被占用，请先释放这些端口: " + "; ".join(conflicts))
-        for name in ("smbd", "nmbd"):
+        conflicts = check_ports(include_netbios=self.settings.netbios_mode != "external")
+        udp_conflicts = [conflict for conflict in conflicts if conflict.startswith("UDP ")]
+        required_conflicts = [conflict for conflict in conflicts if conflict.startswith("TCP ")]
+        if self.settings.netbios_mode == "internal":
+            required_conflicts += udp_conflicts
+        if required_conflicts:
+            raise RuntimeError("NAS 上的 SMB/发现端口被占用，请先释放这些端口: " + "; ".join(required_conflicts))
+        self.discovery_mode = (
+            "external" if self.settings.netbios_mode == "external" or udp_conflicts else "internal"
+        )
+        if self.discovery_mode == "external":
+            log.info("NetBIOS discovery uses the host service or direct IP access; CamMon nmbd is disabled%s",
+                     ": " + "; ".join(udp_conflicts) if udp_conflicts else "")
+        names = ("smbd", "nmbd") if self.discovery_mode == "internal" else ("smbd",)
+        for name in names:
             process = subprocess.Popen([
                 str(self.settings.samba_prefix / "sbin" / name), "-F", "--no-process-group",
                 "-s", str(self.settings.samba_config),
             ], start_new_session=True)
             self.processes.append(process)
+
+    def discovery_status(self) -> dict:
+        messages = {
+            "pending": "摄像机接入服务尚未启动",
+            "internal": "CamMon 提供局域网发现，名称为 CAMMON",
+            "external": "使用 NAS 现有发现服务，请通过 NAS 名称或 IP 接入",
+        }
+        return {"mode": self.discovery_mode, "message": messages[self.discovery_mode]}
 
     def health(self) -> str | None:
         for process in self.processes:

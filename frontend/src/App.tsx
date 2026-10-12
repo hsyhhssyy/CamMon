@@ -109,6 +109,7 @@ export default function App() {
       {status?.worker_error && <div className="alert"><AlertCircle size={20}/><div><strong>后台任务异常</strong><p>{status.worker_error}</p></div></div>}
       {status?.cache_error && <div className="alert"><AlertCircle size={20}/><div><strong>缓存容量告警</strong><p>{status.cache_error}</p></div></div>}
       {status?.metadata.error && <div className="alert"><Database size={20}/><div><strong>元数据暂存在内存中</strong><p>{status.metadata.error}；{status.metadata.pending_rows} 条元数据等待同步，摄像机继续按内存配置服务。</p></div></div>}
+      {status?.discovery?.mode === 'external' && <div className="hint"><Server size={19}/><span>{status.discovery.message}。</span></div>}
       {!!status?.alerts.length && <div className="alert"><AlertCircle size={20}/><div><strong>{status.alerts.length} 段录像需要处理</strong><p>{status.alerts.slice(0, 3).map(item => `${item.path}: ${item.error}`).join('；')}</p><button className="text-button" onClick={() => { setFilter(emptyFilters); setView('files') }}>查看录像详情</button></div></div>}
 
       {(view === 'overview' || view === 'files') && <>

@@ -65,6 +65,7 @@
 | S1-BUG-006 | slim 镜像缺少网络名称映射导致 NFS 测试服务启动失败 | 2026-10-09 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
 | S1-BUG-007 | 旧版 libnfs 无法编码较大 NFSv4 写入 | 2026-10-09 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
 | S1-BUG-008 | GHCR Public 状态未满足原私有交付要求 | 2026-10-09 | closed | cross-requirement | S1-RQ-003 |
+| S1-BUG-009 | NAS 已有 NetBIOS UDP 端口阻止 SMB 文件服务启动 | 2026-10-12 | fixed | cross-requirement | S1-RQ-001 / S1-RQ-003 |
 
 ## 条目明细
 
@@ -173,9 +174,23 @@
 - `回归情况`：v0.1.4 应用、amd64 / arm64 的全部 82 项容器测试和生产上传通过；新包上传后 API 实际返回 Public，版本标签发布被阻止。两个新包均出现该行为，需确认独立私有发布仓库或现有仓库改私有的方式，未将发布判为成功。
 - `关闭结果`：2026-10-10 用户明确接受公开镜像；cammon:0.1.3 和 latest 已验证匿名 HTTP 200、相同 digest 和双架构支持，部署地址与 CI 检查改回 Public。
 
+### S1-BUG-009
+
+- `BUG-ID`：`S1-BUG-009`
+- `标题`：NAS 已有 NetBIOS UDP 端口阻止 SMB 文件服务启动。
+- `发现时间`：2026-10-12。
+- `发现来源`：目标 NAS 192.168.31.26:18080 管理页 HTTP 200，/healthz HTTP 503，明确提示 UDP 137/138 被占用；用户确认端口无法释放。
+- `当前状态`：`fixed`，本机协议验收通过，目标 NAS 更新后验收待执行。
+- `归属类型`：`cross-requirement`。
+- `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
+- `现象 / 影响`：启动检查把 UDP 发现和 TCP 文件服务一起判为必需，NAS 原有发现服务会阻止 CamMon smbd 启动。
+- `处理结果`：新增 auto / internal / external 模式；auto 在任一 UDP 端口不可用时跳过 nmbd，external 明确沿用宿主机发现，internal 保留独占要求。TCP 冲突始终阻止启动；健康接口及管理页显示实际发现模式；NAS 无需卸载已有服务。
+- `回归情况`：15 项本机真实 SMB 测试通过，包括已有 nmbd 名称响应、UDP 单独 / 同时占用、TCP 139/445 的 SMB1 登录和写读、健康检查及预检退出码；云端发布和 NAS 更新待执行。
+
 ## 更新日志
 
 - 2026-10-08：记录并修复 5 类原生协议、恢复和并发链路问题。
 - 2026-10-09：登记首个云端容器回归发现的网络基础包缺失，保持协议测试启用并修复部署依赖。
 - 2026-10-09：NFS 服务启动修正后发现旧版 libnfs 写入编码限制，固定升级至已验证的源码版本并增加大块上传回归。
 - 2026-10-10：用户接受公开镜像并请求 NAS Compose，验证既有镜像可匿名访问，关闭私有交付中断。
+- 2026-10-12：修复宿主机 NetBIOS UDP 占用阻止摄像机文件服务启动，增加发现共存配置和真实协议验收。

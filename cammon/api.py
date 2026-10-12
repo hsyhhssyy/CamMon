@@ -203,13 +203,18 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     @app.get("/healthz")
     def health(g: Gateway = Depends(get_gateway)):
         error = g.protocol_error or (g.samba.health() if g.samba else None)
-        return JSONResponse({"ok": not error, "protocol_error": error}, 503 if error else 200)
+        discovery = g.samba.discovery_status() if g.samba else {"mode": "disabled", "message": "摄像机接入已关闭"}
+        return JSONResponse({"ok": not error, "protocol_error": error, "discovery": discovery},
+                            503 if error else 200)
 
     @app.get("/api/status")
     def status(g: Gateway = auth):
         result = g.status()
         if g.samba:
             result["protocol_error"] = result["protocol_error"] or g.samba.health()
+        result["discovery"] = (
+            g.samba.discovery_status() if g.samba else {"mode": "disabled", "message": "摄像机接入已关闭"}
+        )
         return result
 
     @app.get("/api/devices")

@@ -5,7 +5,7 @@ services:
       target: production
       args:
         BUILD_JOBS: ${CAMMON_BUILD_JOBS:-2}
-    image: ${CAMMON_IMAGE:-cammon:0.1.4}
+    image: ${CAMMON_IMAGE:-cammon:0.1.5}
     network_mode: host
     init: true
     restart: unless-stopped
@@ -19,6 +19,7 @@ services:
       CAMMON_SUCCESSOR_QUIET_SECONDS: ${CAMMON_SUCCESSOR_QUIET_SECONDS:-10}
       CAMMON_IDLE_SEAL_SECONDS: ${CAMMON_IDLE_SEAL_SECONDS:-1800}
       CAMMON_ALLOW_NTLMV1: ${CAMMON_ALLOW_NTLMV1:-false}
+      CAMMON_NETBIOS_MODE: ${CAMMON_NETBIOS_MODE:-auto}
       CAMMON_FFMPEG_THREADS: ${CAMMON_FFMPEG_THREADS:-2}
       CAMMON_POSTGRES_DSN: ${CAMMON_POSTGRES_DSN:?请设置 PostgreSQL 元数据连接}
       CAMMON_SECRET_KEY: ${CAMMON_SECRET_KEY:?请设置稳定的 Fernet 凭据加密密钥}

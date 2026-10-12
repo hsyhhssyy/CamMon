@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     admin_password: str = ""
     cookie_secure: bool = False
     samba_enabled: bool = True
+    netbios_mode: Literal["auto", "internal", "external"] = "auto"
     samba_prefix: Path = Path("/opt/samba")
     allow_ntlmv1: bool = False
     socket_path: Path = Path("/run/cammon/vfs.sock")

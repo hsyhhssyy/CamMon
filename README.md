@@ -8,18 +8,18 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 ## NAS 部署
 
-需要 Linux NAS、Docker Compose、可用的 PostgreSQL、足够的临时录像空间和运行内存，以及独占的 UDP 137/138、TCP 139/445。NAS 原有 SMB 服务使用同样端口时，应先由管理员调整 NAS 服务。CamMon 会报告冲突端口，并保留管理页面用于查看错误。
+需要 Linux NAS、Docker Compose、可用的 PostgreSQL、足够的临时录像空间和运行内存，以及独占的 TCP 139/445。NAS 原有 SMB 文件服务使用同样 TCP 端口时，应先由管理员调整 NAS 服务。UDP 137/138 可以由 NAS 已有 NetBIOS 服务提供，默认自动选择共存模式；CamMon 会报告必需端口冲突，并保留管理页面用于查看错误。
 
 ### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用已发布的 `ghcr.io/hsyhhssyy/cammon:0.1.3`，支持 `linux/amd64` 和 `linux/arm64`。2026-10-10 已验证 `0.1.3` 与 `latest` 均可匿名读取，且指向相同的多架构镜像；镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.5`，支持 `linux/amd64` 和 `linux/arm64`。从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存；镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
 test -f .env || cp .env.ghcr.example .env
 chmod 600 .env
 # 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
 # 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.3 \
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.5 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -34,10 +34,16 @@ docker compose -f compose.ghcr.yaml logs -f cammon
 | 协议 / 端口 | 用途 |
 | --- | --- |
 | TCP 139、445 | 摄像机 Samba 访问 |
-| UDP 137、138 | NetBIOS 名称解析与发现 |
+| UDP 137、138 | NetBIOS 名称解析与发现，由 CamMon 或 NAS 已有服务提供 |
 | TCP 18080 | 管理页面，可用 `CAMMON_PORT` 修改 |
 
 启动后访问 `http://NAS-IP:18080`。配置不创建 `/data` 或任何持久化数据卷；元数据使用 PostgreSQL 和内存，Samba 运行文件在 tmpfs，新增录像使用容器临时 `/cache`。PostgreSQL 需要在首次启动和重启时在线，运行期间断线仍按内存配置服务。
+
+NAS 的 NetBIOS UDP 端口无法释放时，使用默认 `CAMMON_NETBIOS_MODE=auto`：只要 UDP 137 或 138 不可用，CamMon 不启动自己的 nmbd，SMB1 文件服务继续监听 TCP 139/445，健康检查不会因这些 UDP 端口报错。管理页及 `/healthz` 的 `discovery` 字段显示实际模式。也可在 `.env` 中显式设置 `CAMMON_NETBIOS_MODE=external`，始终沿用 NAS 发现服务；`internal` 则强制使用自带发现，UDP 冲突仍阻止启动。
+
+共存时使用 NAS 现有的发现名称或直接填写 NAS IP，不会新增独立的 CAMMON 广播名称，也不修改 NAS 的发现服务。NAS 是否广播 SMB 服务器名称、摄像机能否枚举该名称，需要实机确认；直接通过 IP 和生成的共享名接入不依赖 UDP 发现。TCP 139/445 仍须独占。
+
+从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.5` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
 
 更新镜像时执行同一组 `pull` 和 `up -d` 命令；查看状态用 `docker compose -f compose.ghcr.yaml ps`，停止服务用 `docker compose -f compose.ghcr.yaml down`。更新重建容器会丢弃临时录像及未同步的内存变更，符合临时缓存约定。
 
@@ -66,11 +72,11 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.5
-git push origin v0.1.5
+git tag v0.1.6
+git push origin v0.1.6
 ```
 
-镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.5` 发布 `0.1.5`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.5-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.6` 发布 `0.1.6`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.6-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
@@ -78,7 +84,7 @@ git push origin v0.1.5
 
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.3`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.5`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py
@@ -121,7 +127,7 @@ PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archi
 
 设备可以停用和重置接入密码；停用停止摄像机访问，管理页面仍可统计与下载该设备的数据。归档视频只在管理页面可见。
 
-默认允许 NTLMv2。若实机只能使用 NTLMv1，在独立的摄像机局域网内配置 `CAMMON_ALLOW_NTLMV1=true`。发现采用 NetBIOS，同一局域网内可看到 CAMMON；不同摄像机的发现、认证方式仍须实机确认。
+默认允许 NTLMv2。若实机只能使用 NTLMv1，在独立的摄像机局域网内配置 `CAMMON_ALLOW_NTLMV1=true`。自带 NetBIOS 模式中可发现 CAMMON；共存模式沿用 NAS 已有名称，也可直接使用 NAS IP。不同摄像机的发现、认证方式仍须实机确认。
 
 ## 录像流转与恢复
 
@@ -216,7 +222,7 @@ sudo env CAMMON_TEST_SAMBA_PREFIX=/your/samba/prefix CAMMON_TEST_NFS=1 \
 
 PostgreSQL 集成测试需要安装服务端二进制，使用隔离的临时数据库和空闲高位端口，不修改现有数据库：`CAMMON_TEST_POSTGRES=1 uv run --extra test pytest -m postgres -q`。测试覆盖当前进程断线服务、数据库不可用时不能冷启动、启动加载、临时状态丢弃、提交确认丢失、并发同步、归档删除确认、快照恢复和 schema 冲突。原生环境另测清空全部 Samba 运行目录后，原账号与密码仍能通过真实 SMB1 登录、读取既有录像。
 
-原生测试会创建并清理临时 Unix 摄像机账号、启动独立 Samba 和 Ganesha MEM 导出，需要测试机的 UDP 137/138、TCP 445、111、2049 空闲。Ganesha 仅用于测试，运行产品不需要 NFS 服务端、rpcbind 或系统挂载。
+原生测试会创建并清理临时 Unix 摄像机账号、启动独立 Samba 和 Ganesha MEM 导出，需要测试机的 UDP 137/138、TCP 139/445、111、2049 空闲。共存测试临时占用 UDP 端口或启动已有 nmbd，验证发现不受影响、两种 TCP 端口上的 SMB1 认证及读写、健康检查和必需端口冲突。Ganesha 仅用于测试，运行产品不需要 NFS 服务端、rpcbind 或系统挂载。
 
 目前 82 项 Python 测试和浏览器流程通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 发现、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。GitHub Actions 已在 amd64 / arm64 各通过全部 82 项容器测试及生产镜像构建。按最新要求使用公开镜像，`cammon:0.1.3` 及 `latest` 的匿名访问和双架构清单已验证；目标 NAS 的容器运行及摄像机实机验收仍待执行。
 

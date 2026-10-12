@@ -8,15 +8,19 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from impacket.nmb import NetBIOS
 from impacket.smb import SMB_DIALECT
 from impacket.smb3structs import FILE_CREATE, FILE_OPEN, GENERIC_READ, GENERIC_WRITE
 from impacket.smbconnection import SessionError, SMBConnection
 
+from cammon.api import create_app
 from cammon.config import Settings
 from cammon.core import Gateway
 from cammon.rpc import Server
@@ -216,3 +220,158 @@ def test_netbios_discovery_and_port_conflict_report(smb_gateway):
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=10)
+
+
+@pytest.fixture
+def managed_smb_gateway(tmp_path):
+    prefix = Path(os.environ.get("CAMMON_TEST_SAMBA_PREFIX", "/opt/samba"))
+    if os.geteuid() != 0 or not (prefix / "sbin/smbd").exists():
+        pytest.skip("Needs root and a matching Samba/VFS build")
+    for path in (tmp_path, *tmp_path.parents):
+        if path == Path("/tmp"):
+            break
+        path.chmod(0o755)
+    settings = Settings(_env_file=None, postgres_dsn=None, secret_key=None,
+                        data_dir=tmp_path / "data", socket_path=tmp_path / "vfs.sock",
+                        admin_password="native-test-admin-password", samba_prefix=prefix,
+                        worker_enabled=False, cache_reserve_bytes=0)
+    gateway = Gateway(settings)
+    gateway.samba = SambaManager(gateway)
+    gateway.samba.prepare()
+    device = gateway.create_device("Camera using NAS discovery")
+    try:
+        yield gateway, device
+    finally:
+        gateway.shutdown()
+        subprocess.run(["userdel", device["username"]], capture_output=True)
+
+
+def wait_managed_smb(gateway):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        assert not gateway.protocol_error, gateway.protocol_error
+        assert not gateway.samba.health(), gateway.samba.health()
+        try:
+            for port in (139, 445):
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    pass
+            return
+        except OSError:
+            time.sleep(0.1)
+    pytest.fail("Managed smbd did not open TCP 139 and 445")
+
+
+def verify_managed_smb1(device, port):
+    # A camera may use the NAS's existing name, rather than CAMMON, on TCP 139.
+    camera = SMBConnection("NAS-EXISTING", "127.0.0.1", sess_port=port, preferredDialect=SMB_DIALECT)
+    try:
+        camera.login(device["username"], device["password"])
+        assert camera.getDialect() == SMB_DIALECT
+        camera.createDirectory(device["share"], f"day{port}")
+        tree = camera.connectTree(device["share"])
+        handle = camera.openFile(tree, f"day{port}\\00_20251008080000_20251008080100.mp4",
+                                 desiredAccess=GENERIC_READ | GENERIC_WRITE, creationDisposition=FILE_CREATE)
+        assert camera.writeFile(tree, handle, b"0000FRAME", 0) == 9
+        assert camera.writeFile(tree, handle, b"MOOV", 0) == 4
+        assert camera.readFile(tree, handle, 0, 9) == b"MOOVFRAME"
+        camera.closeFile(tree, handle)
+    finally:
+        camera.close()
+
+
+@pytest.mark.parametrize("mode,ports", [
+    ("auto", (137,)), ("auto", (138,)), ("auto", (137, 138)), ("external", ()),
+    ("auto", ()), ("internal", ()),
+])
+def test_smb1_starts_with_host_udp_ports_and_reports_healthy(managed_smb_gateway, mode, ports):
+    gateway, device = managed_smb_gateway
+    gateway.settings.netbios_mode = mode
+    with ExitStack() as stack:
+        owners = []
+        for port in ports:
+            owner = stack.enter_context(socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
+            owner.bind(("0.0.0.0", port))
+            owner.settimeout(2)
+            owners.append(owner)
+        preflight = subprocess.run([sys.executable, "scripts/check_deployment.py", "--port", "0",
+                                    "--netbios-mode", mode, "--cache", str(gateway.settings.cache)],
+                                   capture_output=True, text=True)
+        assert preflight.returncode == 0, preflight.stdout + preflight.stderr
+        api = stack.enter_context(TestClient(create_app(gateway.settings, gateway)))
+        wait_managed_smb(gateway)
+        expected = "external" if ports or mode == "external" else "internal"
+        assert api.get("/healthz").status_code == 200
+        assert api.get("/healthz").json()["discovery"]["mode"] == expected
+        assert len(gateway.samba.processes) == (1 if expected == "external" else 2)
+        for port in (139, 445):
+            verify_managed_smb1(device, port)
+        # The original UDP listeners continue to receive their own traffic.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            for owner in owners:
+                sender.sendto(b"host-service", ("127.0.0.1", owner.getsockname()[1]))
+                assert owner.recvfrom(64)[0] == b"host-service"
+        if expected == "external" and not ports:
+            for port in (137, 138):
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                    probe.bind(("0.0.0.0", port))
+
+
+@pytest.mark.parametrize("mode,transport,port", [
+    ("internal", socket.SOCK_DGRAM, 137),
+    ("auto", socket.SOCK_STREAM, 445),
+    ("external", socket.SOCK_STREAM, 139),
+])
+def test_required_ports_still_block_startup(managed_smb_gateway, mode, transport, port):
+    gateway, _ = managed_smb_gateway
+    gateway.settings.netbios_mode = mode
+    with socket.socket(socket.AF_INET, transport) as owner:
+        owner.bind(("0.0.0.0", port))
+        preflight = subprocess.run([sys.executable, "scripts/check_deployment.py", "--port", "0",
+                                    "--netbios-mode", mode, "--cache", str(gateway.settings.cache)],
+                                   capture_output=True, text=True)
+        assert preflight.returncode == 1, preflight.stdout + preflight.stderr
+        with TestClient(create_app(gateway.settings, gateway)) as api:
+            response = api.get("/healthz")
+            assert response.status_code == 503
+            label = "UDP" if transport == socket.SOCK_DGRAM else "TCP"
+            assert f"{label} {port}" in response.json()["protocol_error"]
+            assert not gateway.samba.processes
+
+
+def test_existing_nas_netbios_discovery_survives_smb1_startup(managed_smb_gateway):
+    gateway, device = managed_smb_gateway
+    host_config = gateway.settings.samba_config.with_name("host-netbios.conf")
+    host_config.write_text(gateway.settings.samba_config.read_text().replace(
+        "netbios name = CAMMON", "netbios name = NAS-EXISTING"
+    ))
+    host = subprocess.Popen([str(gateway.settings.samba_prefix / "sbin/nmbd"), "-F", "--no-process-group",
+                             "-s", str(host_config)], start_new_session=True)
+    discovery = NetBIOS()
+    address = socket.gethostbyname(socket.gethostname())
+
+    def host_names():
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            assert host.poll() is None, "Host nmbd exited"
+            try:
+                names = discovery.getnodestatus("*", address, timeout=0.5)
+                assert any(entry["NAME"].strip() == b"NAS-EXISTING" for entry in names)
+                return
+            except Exception:
+                time.sleep(0.2)
+        pytest.fail("Existing NAS NetBIOS discovery did not reply")
+
+    try:
+        host_names()
+        with TestClient(create_app(gateway.settings, gateway)) as api:
+            wait_managed_smb(gateway)
+            assert api.get("/healthz").json()["discovery"]["mode"] == "external"
+            assert api.get("/healthz").status_code == 200
+            for port in (139, 445):
+                verify_managed_smb1(device, port)
+            host_names()
+            assert host.poll() is None
+    finally:
+        if host.poll() is None:
+            os.killpg(host.pid, signal.SIGTERM)
+            host.wait(timeout=10)
