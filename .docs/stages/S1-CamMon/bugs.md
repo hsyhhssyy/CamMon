@@ -180,12 +180,12 @@
 - `标题`：NAS 已有 NetBIOS UDP 端口阻止 SMB 文件服务启动。
 - `发现时间`：2026-10-12。
 - `发现来源`：目标 NAS 192.168.31.26:18080 管理页 HTTP 200，/healthz HTTP 503，明确提示 UDP 137/138 被占用；用户确认端口无法释放。
-- `当前状态`：`fixed`，本机协议验收通过，目标 NAS 更新后验收待执行。
+- `当前状态`：`fixed`，本机、双架构云端及目标 NAS 更新后的启动 / 协议现场检查通过。
 - `归属类型`：`cross-requirement`。
 - `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：启动检查把 UDP 发现和 TCP 文件服务一起判为必需，NAS 原有发现服务会阻止 CamMon smbd 启动。
 - `处理结果`：新增 auto / internal / external 模式；auto 在任一 UDP 端口不可用时跳过 nmbd，external 明确沿用宿主机发现，internal 保留独占要求。TCP 冲突始终阻止启动；健康接口及管理页显示实际发现模式；NAS 无需卸载已有服务。
-- `回归情况`：15 项本机真实 SMB 测试通过，包括已有 nmbd 名称响应、UDP 单独 / 同时占用、TCP 139/445 的 SMB1 登录和写读、健康检查及预检退出码；[0.1.5 云端发布](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)全部成功，各架构通过 92 项容器测试，公开版本及 latest 已验证匿名访问。NAS 更新后验收待执行。
+- `回归情况`：15 项本机真实 SMB 测试通过，包括已有 nmbd 名称响应、UDP 单独 / 同时占用、TCP 139/445 的 SMB1 登录和写读、健康检查及预检退出码；[0.1.5 云端发布](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)全部成功，各架构通过 92 项容器测试。目标 NAS 更新后健康 HTTP 200、external 模式正常、TCP 139/445 均可协商 SMB1、原有 NetBIOS 仍响应。NAS 实际设备认证、录像写读与转存尚未测试。
 
 ## 更新日志
 
@@ -194,3 +194,4 @@
 - 2026-10-09：NFS 服务启动修正后发现旧版 libnfs 写入编码限制，固定升级至已验证的源码版本并增加大块上传回归。
 - 2026-10-10：用户接受公开镜像并请求 NAS Compose，验证既有镜像可匿名访问，关闭私有交付中断。
 - 2026-10-12：修复宿主机 NetBIOS UDP 占用阻止摄像机文件服务启动，增加发现共存配置和真实协议验收。
+- 2026-10-12：目标 NAS 更新后确认 UDP 共存修复生效，健康与 SMB1 / NetBIOS 协议现场检查通过。

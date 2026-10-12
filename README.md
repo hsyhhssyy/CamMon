@@ -226,7 +226,7 @@ PostgreSQL 集成测试需要安装服务端二进制，使用隔离的临时数
 
 原生测试会创建并清理临时 Unix 摄像机账号、启动独立 Samba 和 Ganesha MEM 导出，需要测试机的 UDP 137/138、TCP 139/445、111、2049 空闲。共存测试临时占用 UDP 端口或启动已有 nmbd，验证发现不受影响、两种 TCP 端口上的 SMB1 认证及读写、健康检查和必需端口冲突。Ganesha 仅用于测试，运行产品不需要 NFS 服务端、rpcbind 或系统挂载。
 
-目前两种架构各通过全部 92 项 Python 容器测试，管理页浏览器流程和生产构建通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 自带发现与宿主机共存、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。`cammon:0.1.5` 及 `latest` 的匿名访问和双架构清单已验证；目标 NAS 管理页已可访问，仍须更新到共存版本并完成摄像机实机验收。
+目前两种架构各通过全部 92 项 Python 容器测试，管理页浏览器流程和生产构建通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 自带发现与宿主机共存、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。`cammon:0.1.5` 及 `latest` 的匿名访问和双架构清单已验证；目标 NAS 更新后的页面、健康接口、SMB1 协商及 NetBIOS 共存已通过现场检查，实际设备认证、录像写读、后端转存及摄像机实机验收仍待完成。
 
 需求和验收记录见 [Stage S1](.docs/stages/S1-CamMon/README.md)。Samba 与 VFS 模块采用 GPL-3.0-or-later，许可证见 [native/COPYING](native/COPYING)。
 

@@ -45,7 +45,7 @@
 ## Stage 背景
 
 - 上一阶段：空项目。
-- 当前阶段状态：`in-progress`，NetBIOS 共存修复及双架构云端验收完成，公开 0.1.5 镜像及 NAS Compose 已提供；NAS 管理页已可访问，等待更新后验证接入，摄像机实机验收待完成。
+- 当前阶段状态：`in-progress`，公开 0.1.5 共存修复及双架构云端验收完成；NAS 更新后页面、健康、SMB1 协商和 NetBIOS 共存现场检查通过，实际录像写读及摄像机实机验收待完成。
 - 启动日期：2026-10-08。
 - 当前阶段定位：交付可部署的第一版录像存储网关。
 
@@ -154,4 +154,5 @@
 1. 自动化验收结论与 NAS/摄像机现场验收分别记录。
 2. 已验证：82 项 Python 测试（含 PostgreSQL 内存断线服务、冷启动和 SMB1 凭据重建）、1 项 Playwright 操作测试、前端生产构建、Ruff、Compose 解析及端口预检。
 3. 已验证：GitHub Actions 在 amd64 / arm64 各通过 82 项容器测试及生产镜像构建；管理端检查通过。2026-10-10 按最新要求使用公开镜像，cammon:0.1.3 和 latest 可匿名访问，清单包含两种架构；[公开发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38017078122)全部成功，edge / SHA 发布及匿名验证通过。
-4. 2026-10-12 目标 NAS 管理页及资源 HTTP 200，旧版因 UDP 137/138 冲突而健康检查失败；共存修复通过本机 15 项真实 SMB 测试、56 项非集成回归、浏览器流程及构建，[0.1.5 发布](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)全部成功，各架构通过 92 项容器测试，公开版本及 latest 匿名验证通过。等待 NAS 更新后验收；摄像机实机仍未验证，开发环境没有 Docker daemon。
+4. 2026-10-12 目标 NAS 旧版因 UDP 137/138 冲突而健康检查失败；共存修复通过本机 15 项真实 SMB 测试、56 项非集成回归、浏览器流程及构建，[0.1.5 发布](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)全部成功，各架构通过 92 项容器测试，公开版本及 latest 匿名验证通过。开发环境没有 Docker daemon。
+5. NAS 更新后现场检查：页面、JS/CSS、健康接口 HTTP 200，external 共存模式正常；TCP 139/445 均可协商 SMB1，已有 NAS NetBIOS 仍响应，未登录管理接口 HTTP 401。尚未取得设备凭据，NAS 实际认证、录像写读、转存及摄像机实机验收待执行。
