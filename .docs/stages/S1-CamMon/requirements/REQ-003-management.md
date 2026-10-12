@@ -72,8 +72,8 @@
 
 - 当前状态：`in-progress`。
 - 当前目标：管理、统计下载和 NAS Docker 部署。
-- 当前已知进展：用户接受公开镜像，cammon:0.1.3 及 latest 已验证匿名访问 HTTP 200、相同 digest 和 amd64 / arm64 支持。NAS Compose、空凭据模板与文档已改为公开的固定版本；公开 CI 发布已全部通过，edge 和对应 SHA 标签完成双架构发布及匿名验证。NAS 实机验收待完成。
-- 最新部署观察：2026-10-12 目标 NAS 管理页及资源 HTTP 200，但健康检查因 UDP 137/138 占用返回 503；已修复为自动 / 显式共存，待发布 0.1.5 并由 NAS 更新镜像。
+- 当前已知进展：cammon:0.1.5 及 latest 已公开发布，匿名访问 HTTP 200、相同 digest 和 amd64 / arm64 支持已验证。NAS Compose、环境模板、预检及管理页支持 NetBIOS 共存模式；全部七个发布任务成功，各架构通过 92 项容器测试。NAS 更新后验收待完成。
+- 最新部署观察：2026-10-12 目标 NAS 管理页及资源 HTTP 200，但旧版健康检查因 UDP 137/138 占用返回 503；自动 / 显式共存修复已发布，等待 NAS 更新镜像。
 - 下一步动作：现场部署验收或负载观察；验收边界见待确认问题。
 
 ## 功能拆解 / 实施拆解
@@ -146,6 +146,15 @@
 - 实际结果：全部七个任务成功，amd64 / arm64 各通过 82 项容器测试；发布 edge 和 sha-0b6ff76c9effcc1940700b0ef154faf6135f906d，清单 digest 为 sha256:289f7ce5ebe26e779e99726706c1c15c1c5ca44b3a90c728905d11b41478d71b，Public 及匿名双架构验证通过。未更新 NAS 默认 0.1.3 标签，未将目标 NAS 或摄像机现场验收计为通过。
 - 证据：[成功的公开发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38017078122)、[公开镜像](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)、[发布流程](../../../../.github/workflows/publish.yml)。
 
+### 2026-10-12 NetBIOS 共存版本公开发布
+
+- 时间：2026-10-12。
+- 场景：向目标 NAS 提供兼容已有 NetBIOS 服务的可拉取版本。
+- 操作步骤：推送 f2752ad22dedd1e422d64a806cf8154cb2577530 的 v0.1.5 标签，执行全部应用、协议、生产构建和发布检查；从开发环境独立匿名读取版本和 latest 清单。
+- 预期结果：两个架构通过检查，公开镜像包含共存配置，稳定标签可匿名拉取。
+- 实际结果：七个云端任务全部成功，amd64 / arm64 各通过 92 项容器测试；0.1.5 / latest 的匿名清单 HTTP 200，均为 sha256:efec32ce323513bc3b8f4f98840e52d951b074c064ff199d8a4cc68758f2aefd，包含 linux/amd64 / linux/arm64。目标 NAS 尚未更新，不将其健康恢复或摄像机联调判为通过。
+- 证据：[成功的发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)、[公开镜像](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)、[Compose](../../../../compose.ghcr.yaml)、[协议验收](REQ-001-gateway.md)。
+
 ## bug / 修复记录
 
 健康检查地址已与 /healthz 对齐；缓存和上传错误在页面显示。
@@ -204,3 +213,4 @@ NAS 已有 NetBIOS 导致 SMB 服务整体无法启动见 [S1-BUG-009](../bugs.m
 - 2026-10-10：用户接受公开镜像，匿名双架构清单已验证；更新 NAS Compose、部署说明和公开发布工作流，私有发布中断关闭，状态仍待 NAS 实机验收。
 - 2026-10-10：公开发布 CI 全部七个任务成功，edge / SHA 双架构镜像及匿名访问验证完成；NAS 默认固定 0.1.3，现场验收状态不变。
 - 2026-10-12：NAS 管理页面已可访问，UDP 冲突导致摄像机接入未启动；本机已验证共存修复，Compose 默认升级到 0.1.5，待发布后进行目标 NAS 验收。
+- 2026-10-12：0.1.5 公开发布完成，双架构 92 项容器测试及匿名访问通过；保留原密钥和连接即可更新 NAS，现场验收仍待执行。

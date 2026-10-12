@@ -185,7 +185,7 @@
 - `关联需求`：[S1-RQ-001](requirements/REQ-001-gateway.md)、[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：启动检查把 UDP 发现和 TCP 文件服务一起判为必需，NAS 原有发现服务会阻止 CamMon smbd 启动。
 - `处理结果`：新增 auto / internal / external 模式；auto 在任一 UDP 端口不可用时跳过 nmbd，external 明确沿用宿主机发现，internal 保留独占要求。TCP 冲突始终阻止启动；健康接口及管理页显示实际发现模式；NAS 无需卸载已有服务。
-- `回归情况`：15 项本机真实 SMB 测试通过，包括已有 nmbd 名称响应、UDP 单独 / 同时占用、TCP 139/445 的 SMB1 登录和写读、健康检查及预检退出码；云端发布和 NAS 更新待执行。
+- `回归情况`：15 项本机真实 SMB 测试通过，包括已有 nmbd 名称响应、UDP 单独 / 同时占用、TCP 139/445 的 SMB1 登录和写读、健康检查及预检退出码；[0.1.5 云端发布](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)全部成功，各架构通过 92 项容器测试，公开版本及 latest 已验证匿名访问。NAS 更新后验收待执行。
 
 ## 更新日志
 
