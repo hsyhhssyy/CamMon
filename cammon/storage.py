@@ -1,9 +1,8 @@
-"""User-space storage adapters. No kernel mounts or FUSE are used."""
+"""Local disk and user-space network storage adapters. No FUSE is used."""
 
 import errno
 import hashlib
 import os
-import shutil
 import socket
 import uuid
 from abc import ABC, abstractmethod
@@ -95,14 +94,19 @@ def file_hash(path: Path, stopping=None) -> str:
 
 
 class LocalBackend(Backend):
-    """Test fixture only; intentionally unavailable in the public storage configuration."""
+    """Store recordings directly in a local directory or Docker bind mount."""
 
     def __init__(self, root: Path):
-        self.root = root
-        root.mkdir(parents=True, exist_ok=True)
+        if not root.is_absolute() or ".." in root.parts or any(c in str(root) for c in ("\n", "\r", "\x00")):
+            raise ValueError("本地磁盘地址必须是绝对路径，不能包含 .. 或控制字符")
+        self.root = root.resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, path: str) -> Path:
-        return self.root / safe_key(path)
+        target = self.root / safe_key(path)
+        if not target.resolve().is_relative_to(self.root):
+            raise ValueError("本地存储文件不能位于配置的磁盘目录之外")
+        return target
 
     def reader(self, path: str):
         return self._path(path).open("rb")
@@ -114,7 +118,9 @@ class LocalBackend(Backend):
     def upload(self, path: str, source: Path):
         self.mkdirs(str(PurePosixPath(path).parent))
         with source.open("rb") as src, self._path(path).open("wb") as dst:
-            shutil.copyfileobj(src, dst, CHUNK)
+            while data := src.read(CHUNK):
+                self.check_cancelled()
+                dst.write(data)
             dst.flush()
             os.fsync(dst.fileno())
 
@@ -341,11 +347,13 @@ class NFSBackend(Backend):
 
 
 def make_backend(config: dict, timeout: int = 30) -> Backend:
+    if config["protocol"] == "local":
+        return LocalBackend(Path(config.get("address", "/data")))
     if config["protocol"] == "smb":
         return SMBBackend(config, timeout)
     if config["protocol"] == "nfs":
         return NFSBackend(config, timeout)
-    raise ValueError("Only SMB2/3 and NFS storage are supported")
+    raise ValueError("支持的真实存储方式为本地磁盘、SMB2/3 和 NFS")
 
 
 def reject_self_storage(config: dict, gateway_shares: list[str]):

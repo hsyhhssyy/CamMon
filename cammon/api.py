@@ -54,8 +54,8 @@ class DeviceUpdate(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    protocol: Literal["smb", "nfs"]
-    address: str = Field(min_length=1, max_length=2000)
+    protocol: Literal["local", "smb", "nfs"] = "local"
+    address: str = Field(default="/data", min_length=1, max_length=2000)
     username: str = Field(default="", max_length=200)
     password: str | None = Field(default=None, max_length=2000)
     domain: str = Field(default="", max_length=200)
@@ -142,7 +142,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             if owns_gateway:
                 g.shutdown()
 
-    app = FastAPI(title="CamMon", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="CamMon", version="0.1.6", lifespan=lifespan)
 
     @app.middleware("http")
     async def browser_protection(request: Request, call_next):

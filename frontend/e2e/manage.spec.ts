@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 test('login, devices, conjunctive filters, download, settings and mobile layout', async ({ page }) => {
   const errors: string[] = []
@@ -35,8 +38,32 @@ test('login, devices, conjunctive filters, download, settings and mobile layout'
   await page.getByRole('button', { name: '真实存储', exact: true }).click()
   await expect(page.getByRole('heading', { name: '元数据数据库' })).toBeVisible()
   await expect(page.getByText('尚未配置 · 仅内存运行')).toBeVisible()
+  const localButton = page.getByRole('button', { name: /本地磁盘/ })
+  await expect(localButton).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByLabel('磁盘路径')).toHaveValue('/data')
+  await expect(page.getByLabel('NFS 版本')).toHaveCount(0)
+  await expect(page.getByLabel('密码', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: /NFS/ }).click()
   await expect(page.getByLabel('NFS 版本')).toBeVisible()
+  await page.getByRole('button', { name: /SMB2/ }).click()
+  await expect(page.getByLabel('用户名', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('密码', { exact: true })).toBeVisible()
+  await localButton.click()
+  await expect(page.getByLabel('磁盘路径')).toHaveValue('/data')
+  const localDisk = mkdtempSync(join(tmpdir(), 'cammon-browser-storage-'))
+  try {
+    await page.getByLabel('磁盘路径').fill(localDisk)
+    await page.getByRole('button', { name: '测试读写连接' }).click()
+    await expect(page.getByRole('status')).toContainText('连接、写入、读取、改名和删除均成功')
+    await page.getByRole('button', { name: '保存配置' }).click()
+    await expect(page.getByRole('status')).toContainText('存储设置已保存')
+    await page.reload()
+    await page.getByRole('button', { name: '真实存储', exact: true }).click()
+    await expect(localButton).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByLabel('磁盘路径')).toHaveValue(localDisk)
+  } finally {
+    rmSync(localDisk, { recursive: true, force: true })
+  }
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   await page.screenshot({ path: '/tmp/cammon-mobile.png', fullPage: true })

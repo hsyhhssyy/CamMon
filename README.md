@@ -1,6 +1,6 @@
 # CamMon 摄像机录像存储网关
 
-CamMon 在 NAS 的 IP 上提供 SMB1 共享和 NetBIOS 发现服务。每台设备拥有独立账号、共享和保留天数；设备内按字符串相机编号 X 管理录像。摄像机写入本地缓存，完成的录像整文件转存至 SMB2/3 或 NFS。过期录像按北京时间自然日生成 60 倍速 H.264 MP4，归档永久保留。
+CamMon 在 NAS 的 IP 上提供 SMB1 共享和 NetBIOS 发现服务。每台设备拥有独立账号、共享和保留天数；设备内按字符串相机编号 X 管理录像。摄像机写入本地缓存，完成的录像整文件转存至本地磁盘、SMB2/3 或 NFS；默认选择本地磁盘，直接保存到 NAS 挂载目录。过期录像按北京时间自然日生成 60 倍速 H.264 MP4，归档永久保留。
 
 管理页面提供设备配置、后端连接测试、组合统计、分页文件列表、字节范围下载、容量告警和归档任务重试。前端资源随镜像提供，运行时无需外部字体或 CDN。
 
@@ -12,14 +12,14 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 ### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用已发布的 `ghcr.io/hsyhhssyy/cammon:0.1.5`，支持 `linux/amd64` 和 `linux/arm64`。2026-10-12 已验证 0.1.5 / latest 可匿名访问；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.6`，支持 `linux/amd64` 和 `linux/arm64`。0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
 test -f .env || cp .env.ghcr.example .env
 chmod 600 .env
 # 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
 # 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.5 \
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.6 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -37,13 +37,15 @@ docker compose -f compose.ghcr.yaml logs -f cammon
 | UDP 137、138 | NetBIOS 名称解析与发现，由 CamMon 或 NAS 已有服务提供 |
 | TCP 18080 | 管理页面，可用 `CAMMON_PORT` 修改 |
 
-启动后访问 `http://NAS-IP:18080`。配置不创建 `/data` 或任何持久化数据卷；元数据使用 PostgreSQL 和内存，Samba 运行文件在 tmpfs，新增录像使用容器临时 `/cache`。PostgreSQL 需要在首次启动和重启时在线，运行期间断线仍按内存配置服务。
+启动后访问 `http://NAS-IP:18080`。Compose 默认将 NAS 的 `/volume1/WebCam` 挂载到容器 `/data`，用于持久保存完成的录像和归档；可在 `.env` 中通过 `CAMMON_STORAGE_PATH` 修改 NAS 目录。管理页面首次默认选择“本地磁盘”，路径为 `/data`，测试读写后保存即可启用；已有 SMB/NFS 配置继续沿用。元数据使用 PostgreSQL 和内存，Samba 运行文件在 tmpfs，新增录像使用容器临时 `/cache`。PostgreSQL 需要在首次启动和重启时在线，运行期间断线仍按内存配置服务。
+
+本地磁盘功能从 `0.1.6` 开始提供。已有录像时，切换存储方式或 NAS 目录前须迁移录像和索引；更新镜像不会自动将已有 SMB/NFS 录像搬到本地磁盘。
 
 NAS 的 NetBIOS UDP 端口无法释放时，使用默认 `CAMMON_NETBIOS_MODE=auto`：只要 UDP 137 或 138 不可用，CamMon 不启动自己的 nmbd，SMB1 文件服务继续监听 TCP 139/445，健康检查不会因这些 UDP 端口报错。管理页及 `/healthz` 的 `discovery` 字段显示实际模式。也可在 `.env` 中显式设置 `CAMMON_NETBIOS_MODE=external`，始终沿用 NAS 发现服务；`internal` 则强制使用自带发现，UDP 冲突仍阻止启动。
 
 共存时使用 NAS 现有的发现名称或直接填写 NAS IP，不会新增独立的 CAMMON 广播名称，也不修改 NAS 的发现服务。NAS 是否广播 SMB 服务器名称、摄像机能否枚举该名称，需要实机确认；直接通过 IP 和生成的共享名接入不依赖 UDP 发现。TCP 139/445 仍须独占。
 
-从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.5` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
+从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.6` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
 
 更新镜像时执行同一组 `pull` 和 `up -d` 命令；查看状态用 `docker compose -f compose.ghcr.yaml ps`，停止服务用 `docker compose -f compose.ghcr.yaml down`。更新重建容器会丢弃临时录像及未同步的内存变更，符合临时缓存约定。
 
@@ -63,7 +65,7 @@ docker compose logs -f cammon
 
 浏览器访问 `http://NAS-IP:18080`，用 `.env` 中的账号登录。首次启动将管理员密码哈希写入数据库，此后修改环境变量不会重置已有密码。管理端口可用 `CAMMON_PORT` 改为其他端口，预检时同样传入 `--port`。
 
-镜像默认使用普通容器内的 root 管理 Samba 独立 Unix 账号。Compose 使用 host 网络，无 `privileged`、额外 capability、FUSE 设备或宿主机 SMB/NFS 挂载，也不挂载本地持久数据目录。`/run/cammon` 使用 tmpfs；`/cache` 使用容器临时可写层。不要设置容器为非 root，也不要运行多个 CamMon 实例共用同一 PostgreSQL schema。
+镜像默认使用普通容器内的 root 管理 Samba 独立 Unix 账号。Compose 使用 host 网络，无 `privileged`、额外 capability、FUSE 设备或宿主机 SMB/NFS 挂载。本地磁盘通过普通目录绑定挂载：`${CAMMON_STORAGE_PATH:-/volume1/WebCam}:/data`，录像转存不经过 SMB/NFS 网络。`/run/cammon` 使用 tmpfs；`/cache` 使用容器临时可写层。不要设置容器为非 root，也不要运行多个 CamMon 实例共用同一 PostgreSQL schema。
 
 构建会从固定的 Samba **4.25.0** 源码同时生成 `smbd`、`nmbd` 和 VFS 模块，并编译固定版本的 **libnfs 5.0.2**，两份源码均校验 SHA256。libnfs 单独构建并与 CFFI 桥接配套，避免 Debian 旧版客户端无法编码较大 NFSv4 写入。首次构建需要网络和一定编译时间。`CAMMON_BUILD_JOBS` 默认 2，可按 NAS 内存调整。
 
@@ -72,11 +74,11 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.6
-git push origin v0.1.6
+git tag v0.1.7
+git push origin v0.1.7
 ```
 
-镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.6` 发布 `0.1.6`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.6-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.7` 发布 `0.1.7`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.7-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
@@ -86,7 +88,7 @@ git push origin v0.1.6
 
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.5`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.6`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py
@@ -107,7 +109,7 @@ CAMMON_SECRET_KEY=生成的Fernet密钥
 
 连接指向已创建的 PostgreSQL 数据库，账号须能连接、创建自己的 schema/table，以及读写这些表。管理员也可提前创建专用 schema 并授予该账号所有权。保留连接中的 `sslmode` 等 TLS 参数；本机未启用 TLS 的测试服务可按环境调整。连接字符串与密钥只从部署环境读取，不通过 API 返回。Compose 要求配置连接及密钥；直接开发运行可省略 PostgreSQL，此时所有元数据仅存在于内存，重启从空配置开始。
 
-PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archive_jobs`、`coverage`、`sessions` 表，分别包含配置、设备、目录、录像索引、归档任务、跨日覆盖关系与会话哈希。录像字节仍在临时缓存及 SMB/NFS 后端；远程存储密码和摄像机密码使用 `CAMMON_SECRET_KEY` 加密后保存到 PostgreSQL，管理员密码只保存哈希。Samba 的临时凭据库在 tmpfs 中，启动时从 PostgreSQL 中的凭据重建。
+PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archive_jobs`、`coverage`、`sessions` 表，分别包含配置、设备、目录、录像索引、归档任务、跨日覆盖关系与会话哈希。录像字节仍在临时缓存及本地磁盘或 SMB/NFS 后端；远程存储密码和摄像机密码使用 `CAMMON_SECRET_KEY` 加密后保存到 PostgreSQL，管理员密码只保存哈希。Samba 的临时凭据库在 tmpfs 中，启动时从 PostgreSQL 中的凭据重建。
 
 进程启动时，在一致性事务中从 PostgreSQL 加载配置、元数据与索引，重建虚拟目录和 Samba 凭据。随后使用 SQLite `:memory:` 管理运行索引及事务队列，临时 SQL 数据同样只用内存，不生成 SQLite、WAL 或本地密钥文件。独立线程默认每 5 秒分批同步；关联记录和凭据一起保存，使已提交批次可重新加载。远端事务提交后才确认内存队列，重复确认可幂等重放，连续修改按记录合并。
 
@@ -120,6 +122,7 @@ PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archi
 ## 配置与接入
 
 1. 在“真实存储”页面填写一个全局后端，先点击“测试读写连接”，再保存。
+   - 本地磁盘（默认）：填写容器内的绝对路径，默认 `/data`；Compose 默认绑定 NAS 的 `/volume1/WebCam`，无需账号密码或网络传输。原录像保存在 `originals/设备ID/`，归档保存在 `archives/设备ID/`。更换 NAS 目录时修改 `.env` 中的 `CAMMON_STORAGE_PATH` 并重建容器；页面路径保持 `/data`。
    - SMB：`smb://192.168.1.10/recordings`，可带端口和共享内子目录，账号、密码、域分别填写。使用 SMB2/3；可要求 SMB3 加密。
    - NFS：`nfs://192.168.1.10/volume1/recordings`，必须填写完整导出目录，选择 NFSv3 或 NFSv4.0。默认 UID/GID 65534；在 NAS 上允许配置的 UID/GID 读写并允许网关 IP 访问导出。
 2. 在“摄像机管理”添加设备并设置保留天数。保存一次性显示的共享路径、用户名和密码，填入摄像机的 NAS 配置。
@@ -142,9 +145,9 @@ flowchart LR
     Outbox --> PostgreSQL[PostgreSQL 元数据]
     PostgreSQL -->|启动加载| Index
     RPC --> Cache[本地录像缓存]
-    Cache --> Upload[顺序上传临时文件]
+    Cache --> Upload[顺序转存临时文件]
     Upload --> Verify[刷新 / 大小与 SHA256 校验 / 改名]
-    Verify --> Remote[SMB2/3 或 NFS 原录像]
+    Verify --> Remote[本地磁盘 / SMB2/3 / NFS 原录像]
     Remote --> Archive[按 X 与北京时间日期生成 60× 归档]
     Archive --> Permanent[校验发布后永久保存]
     Index --> Web[管理页面 / 筛选 / 下载]
@@ -152,7 +155,7 @@ flowchart LR
 
 同一 X 出现时间更晚的录像后，上一段在所有写入句柄关闭且连续 10 秒未修改时封存。最后一段没有后续录像时，关闭句柄且连续 30 分钟未修改也会封存。不同 X 独立处理；迟到的旧片段不会误封存当前片段。
 
-上传至后端临时文件，刷新后核对大小及 SHA256，再改名为最终文件。成功前保留本地源文件；成功后删除本地录像缓存，索引中的路径、大小、文件 ID 保持一致。已打开的本地读取句柄可继续读完，之后读取通过用户态后端客户端完成。枚举、属性、统计均使用索引；共享目录中的零字节文件只是 Samba 的路径占位，不能拿它们当录像备份。
+转存至后端临时文件，刷新后核对大小及 SHA256，再改名为最终文件。成功前保留本地源文件；成功后删除本地录像缓存，索引中的路径、大小、文件 ID 保持一致。已打开的本地读取句柄可继续读完，之后读取通过对应的后端适配器完成；本地磁盘直接读写挂载目录，SMB/NFS 使用用户态客户端。枚举、属性、统计均使用索引；共享目录中的零字节文件只是 Samba 的路径占位，不能拿它们当录像备份。
 
 后端故障期间在当前进程中保留缓存并重试。重启丢弃临时录像，不恢复中断的缓存上传；数据库中已保存的归档任务和远程录像可重新加载。空间不足时向摄像机返回 ENOSPC 并在页面告警。空间限制计算缓存录像与归档临时视频的实际总大小；应给缓存预留网络离线和归档工作空间。
 
@@ -174,6 +177,8 @@ flowchart LR
 | `/run/cammon/runtime/archive-manifests/` | tmpfs 中的转码清单，完成后删除 |
 | `/cache/blobs/` | 临时录像字节，无重启恢复保证 |
 | `/cache/work/` | 归档下载、转码临时文件及发布候选文件 |
+| `/data/` | 默认本地真实存储目录，绑定 NAS 的 `/volume1/WebCam`，持久保存原录像与归档 |
+| `CAMMON_STORAGE_PATH` | Compose 的宿主机录像目录，默认 `/volume1/WebCam`；容器内挂载路径为 `/data` |
 | `CAMMON_CACHE_LIMIT_BYTES` | 默认 10 GiB；0 表示使用磁盘剩余空间 |
 | `CAMMON_CACHE_RESERVE_BYTES` | 默认给磁盘预留 64 MiB |
 | `CAMMON_SUCCESSOR_QUIET_SECONDS` | 默认 10 秒 |
@@ -187,7 +192,7 @@ flowchart LR
 | `CAMMON_METADATA_STATEMENT_TIMEOUT_SECONDS` | 默认 5 秒，限制数据库语句及锁等待 |
 | `CAMMON_METADATA_BATCH_SIZE` | 默认选择 256 条变更，附带保存相关依赖 |
 
-需要备份的是 PostgreSQL、远程录像和部署配置中的密钥。无需持久化 `/data` 或本地元数据库，也无需保留临时录像缓存。需要选择 SSD 临时录像路径时，可在 Compose override 中仅为 `/cache` 绑定 scratch 目录；其中录像仍按重启时丢弃处理。元数据和 Samba 运行文件保持内存 / tmpfs 模式。
+需要备份的是 PostgreSQL、真实存储中的录像和部署配置中的密钥。本地磁盘模式应备份 `/data` 对应的 NAS 目录；SMB/NFS 模式备份远程录像目录。无需保留临时录像缓存。需要选择 SSD 临时录像路径时，可在 Compose override 中仅为 `/cache` 绑定 scratch 目录；其中录像仍按重启时丢弃处理。元数据和 Samba 运行文件保持内存 / tmpfs 模式。
 
 已有录像时禁止直接切换存储协议、地址或 NFS 版本。第一版没有自动迁移工具；更换地址需要独立安排数据与索引迁移。单纯更新账号密码不会迁移或重复统计数据。
 
@@ -226,7 +231,7 @@ PostgreSQL 集成测试需要安装服务端二进制，使用隔离的临时数
 
 原生测试会创建并清理临时 Unix 摄像机账号、启动独立 Samba 和 Ganesha MEM 导出，需要测试机的 UDP 137/138、TCP 139/445、111、2049 空闲。共存测试临时占用 UDP 端口或启动已有 nmbd，验证发现不受影响、两种 TCP 端口上的 SMB1 认证及读写、健康检查和必需端口冲突。Ganesha 仅用于测试，运行产品不需要 NFS 服务端、rpcbind 或系统挂载。
 
-目前两种架构各通过全部 92 项 Python 容器测试，管理页浏览器流程和生产构建通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 自带发现与宿主机共存、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。`cammon:0.1.5` 及 `latest` 的匿名访问和双架构清单已验证；目标 NAS 更新后的页面、健康接口、SMB1 协商及 NetBIOS 共存已通过现场检查，实际设备认证、录像写读、后端转存及摄像机实机验收仍待完成。
+0.1.5 的两种架构各通过全部 92 项 Python 容器测试，管理页浏览器流程和生产构建通过，已验证实际 SMB1 客户端写入和读取、SMB2/3 后端、NFSv3/v4.0、NetBIOS 自带发现与宿主机共存、FFmpeg 跨日归档、PostgreSQL 18 内存断线服务、冷启动加载和 Samba 原账号重建。上传中断与远程 ENOSPC 使用真实适配器操作周围的可控故障注入。`cammon:0.1.5` 及 `latest` 的匿名访问和双架构清单已验证；目标 NAS 更新后的页面、健康接口、SMB1 协商及 NetBIOS 共存已通过现场检查，实际设备认证、录像写读、后端转存及摄像机实机验收仍待完成。
 
 需求和验收记录见 [Stage S1](.docs/stages/S1-CamMon/README.md)。Samba 与 VFS 模块采用 GPL-3.0-or-later，许可证见 [native/COPYING](native/COPYING)。
 

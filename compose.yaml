@@ -5,7 +5,7 @@ services:
       target: production
       args:
         BUILD_JOBS: ${CAMMON_BUILD_JOBS:-2}
-    image: ${CAMMON_IMAGE:-cammon:0.1.5}
+    image: ${CAMMON_IMAGE:-cammon:0.1.6}
     network_mode: host
     init: true
     restart: unless-stopped
@@ -27,3 +27,5 @@ services:
       CAMMON_METADATA_SYNC_SECONDS: ${CAMMON_METADATA_SYNC_SECONDS:-5}
     tmpfs:
       - /run/cammon:mode=0755
+    volumes:
+      - ${CAMMON_STORAGE_PATH:-/volume1/WebCam}:/data

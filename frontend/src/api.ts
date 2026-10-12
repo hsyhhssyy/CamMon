@@ -1,6 +1,6 @@
 export type Device = { id: string; name: string; share: string; username: string; retention_days: number; enabled: number; password?: string }
 export type Recording = { id: number; device_id: string; device_name: string; path: string; channel: string; day: string; start: number; end: number; kind: 'original' | 'archive'; state: string; size: number; error: string | null; duration: number | null }
-export type Storage = { protocol: 'smb' | 'nfs'; address: string; username: string; password?: string | null; has_password?: boolean; domain: string; encrypt: boolean; nfs_version: 3 | 4; uid: number; gid: number }
+export type Storage = { protocol: 'local' | 'smb' | 'nfs'; address: string; username: string; password?: string | null; has_password?: boolean; domain: string; encrypt: boolean; nfs_version: 3 | 4; uid: number; gid: number }
 export type Job = { id: string; day: string; channel: string; device_id: string; status: string; error: string | null }
 export type MetadataStatus = { configured: boolean; connected: boolean; schema: string; pending_rows: number; last_sync: number | null; error: string | null }
 export type Status = { storage_configured: boolean; cache_bytes: number; cache_available_bytes: number; cache_limit_bytes: number; cache_error: string | null; pending_files: number; writing_handles: number; protocol_error: string | null; worker_error: string | null; alerts: { id: number; path: string; error: string }[]; jobs: Job[]; metadata: MetadataStatus; discovery: { mode: 'pending' | 'internal' | 'external' | 'disabled'; message: string } }

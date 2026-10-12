@@ -85,6 +85,41 @@ def test_storage_password_is_encrypted_and_destination_locked(admin, gateway, de
     assert gateway.storage_config(reveal=True)["password"] == "a-secret"
 
 
+def test_local_disk_probe_save_publish_download_and_destination_lock(admin, gateway, device, tmp_path):
+    root = tmp_path / "mounted-disk"
+    config = {"address": str(root)}  # The default storage protocol is local disk.
+    response = admin.post("/api/storage/test", json=config)
+    assert response.status_code == 200 and response.json()["ok"]
+    assert list(root.iterdir()) == []
+    assert gateway.storage_config() is None  # Probing does not save configuration.
+
+    response = admin.put("/api/storage", json=config)
+    assert response.status_code == 200
+    assert response.json()["protocol"] == "local" and not response.json()["has_password"]
+    assert admin.get("/api/storage").json()["address"] == str(root)
+    token = create(gateway, device)
+    gateway.close(token)
+    gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1), gateway.recording(1)["error"]
+    row = gateway.recording(1)
+    assert row["state"] == "stored"
+    assert (root / row["remote_path"]).read_bytes() == b"video-data"
+    assert not gateway.blob(1).exists()
+    response = admin.get("/api/files/1/download", headers={"Range": "bytes=6-"})
+    assert response.status_code == 206 and response.content == b"data"
+    other_root = tmp_path / "other-disk"
+    assert admin.put("/api/storage", json={"address": str(other_root)}).status_code == 422
+    assert not other_root.exists()
+    assert admin.put("/api/storage", json={"protocol": "nfs", "address": "nfs://example/export"}).status_code == 422
+    assert admin.put("/api/storage", json=config).status_code == 200
+
+
+@pytest.mark.parametrize("address", ["", "relative/path", "/data/../other", "smb://example/share", "/data\x00"])
+def test_local_disk_rejects_invalid_addresses(admin, address):
+    response = admin.put("/api/storage", json={"protocol": "local", "address": address})
+    assert response.status_code == 422
+
+
 def test_device_create_and_edit(admin):
     device = admin.post("/api/devices", json={"name": "后院", "retention_days": 7}).json()
     assert device["password"] and device["retention_days"] == 7

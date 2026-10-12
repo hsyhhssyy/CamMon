@@ -208,6 +208,37 @@ def test_cold_boot_loads_postgres_and_discards_unsynced_memory_and_cache(pg_gate
         recovered.shutdown()
 
 
+def test_local_disk_configuration_and_recordings_survive_empty_runtime(pg_gateway, tmp_path):
+    g = pg_gateway
+    root = tmp_path / "mounted-disk"
+    g.configure_storage({"protocol": "local", "address": str(root)})
+    device = g.create_device("本地磁盘摄像机")
+    g.mkdir(device["id"], "day")
+    token = create(g, device)
+    g.close(token)
+    g.seal_candidates(time.time() + 1900)
+    assert g.flush_one(1)
+    path = root / g.recording(1)["remote_path"]
+    drain(g)
+    settings = g.settings.model_copy(update={"data_dir": tmp_path / "empty-runtime",
+                                              "cache_dir": tmp_path / "empty-cache"})
+    g.metadata.stop()
+    recovered = Gateway(settings)
+    try:
+        assert recovered.storage_config()["protocol"] == "local"
+        assert recovered.storage_config()["address"] == str(root)
+        assert isinstance(recovered.backend, LocalBackend)
+        assert not list(recovered.blobs.iterdir())
+        token = recovered.open(device["id"], FIRST, os.O_RDONLY)
+        try:
+            assert recovered.read(token, 10, 0) == b"video-data"
+        finally:
+            recovered.close(token)
+        assert path.read_bytes() == b"video-data"
+    finally:
+        recovered.shutdown()
+
+
 def test_lost_commit_acknowledgement_replays_without_duplicate_rows(pg_gateway, monkeypatch):
     g = pg_gateway
     device = g.create_device("入口")

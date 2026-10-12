@@ -66,7 +66,7 @@
 4. Docker host 网络，管理默认 18080；Samba 状态与虚拟目录用 tmpfs，元数据及凭据保存 PostgreSQL，录像缓存允许重启丢失；启动检查具体端口冲突。
 5. 第一版文件列表和下载；已有数据禁止直接更换后端地址，不自动迁移。
 6. GitHub Actions 在版本标签推送或手动触发时发布 GHCR 镜像，复用全部检查和编译缓存；amd64 / arm64 原生测试与构建，发布 production 多架构镜像。普通分支与 PR 只执行检查。
-7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.5，host 网络直接监听 TCP 139/445/18080，管理端口可配置。UDP 137/138 默认自动沿用 NAS 已有发现，支持 CAMMON_NETBIOS_MODE=external 显式共存。CI 验证 Public 及匿名镜像访问。
+7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.6，host 网络直接监听 TCP 139/445/18080，管理端口可配置。UDP 137/138 默认自动沿用 NAS 已有发现，支持 CAMMON_NETBIOS_MODE=external 显式共存。CI 验证 Public 及匿名镜像访问。本地磁盘为新增默认存储选项，容器路径 `/data` 对应 NAS 的 `/volume1/WebCam`，挂载可通过 CAMMON_STORAGE_PATH 修改。
 
 ## 当前状态视图
 

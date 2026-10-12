@@ -44,7 +44,9 @@ def job(gateway, day=None):
     return gateway.db.one("SELECT * FROM archive_jobs ORDER BY created_at DESC")
 
 
-def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gateway, device, videos):
+def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gateway, device, videos, tmp_path):
+    root = tmp_path / "mounted-disk"
+    gateway.configure_storage({"protocol": "local", "address": str(root)})
     gateway.update_device(device["id"], {"retention_days": 1})
     full_id = ingest(gateway, device, "day/00_20251008000000_20251009000000.mp4", videos(86400, "1/60"))
     short_id = ingest(gateway, device, "day/01_20251008080000_20251008080100.mp4", videos(60))
@@ -53,6 +55,7 @@ def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gat
     for queued in gateway.db.all("SELECT * FROM archive_jobs"):
         assert archiver.process(queued["id"]), job(gateway)["error"]
     rows = gateway.query_files({"kind": "archive"})["items"]
+    assert all((root / row["remote_path"]).stat().st_size == row["size"] for row in rows)
     assert {row["channel"] for row in rows} == {"00", "01"}
     assert next(row for row in rows if row["channel"] == "00")["duration"] == pytest.approx(1440, abs=0.2)
     assert next(row for row in rows if row["channel"] == "01")["duration"] == pytest.approx(1, abs=0.2)
@@ -60,6 +63,7 @@ def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gat
     assert gateway.statistics({})["count"] == 2
     for recording_id in (full_id, short_id):
         assert gateway.db.one("SELECT state FROM recordings WHERE id=?", (recording_id,))["state"] == "deleted"
+    assert not list((root / "originals").rglob("*.mp4"))
     assert archiver.enqueue(instant("2030-01-01T02:00:00")) == 0
 
 
