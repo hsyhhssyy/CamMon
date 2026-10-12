@@ -74,8 +74,8 @@ PostgreSQL 持久保存元数据。用户在 2026-10-09 明确：只要求运行
 
 - 当前状态：`done`。
 - 当前目标：PostgreSQL 元数据存储及只在内存缓存的断线服务。
-- 当前已知进展：完成实现及真实 PostgreSQL、SMB1 和 FFmpeg 回归，原持久目录要求已撤销。
-- 下一步动作：用户配置实际连接及稳定密钥，现场验收仍见 REQ-001 / REQ-003。
+- 当前已知进展：完成实现及真实 PostgreSQL、SMB1 和 FFmpeg 回归，原持久目录要求已撤销。目标 NAS 上已验证管理员登录、PostgreSQL 初始化及元数据事务同步，schema 为 cammon，待同步数清零且无错误。
+- 下一步动作：数据库初始化验证完成；录像及后端现场验收仍见 REQ-001 / REQ-003，按用户最新范围暂不继续。
 
 ## 功能拆解 / 实施拆解
 
@@ -106,6 +106,16 @@ PostgreSQL 持久保存元数据。用户在 2026-10-09 明确：只要求运行
 - 预期：满足以上验收标准。
 - 实际：82 项 Python 测试通过，含真实 PostgreSQL 18、Samba 4.25.0 / SMB1、SMB2/3、NFSv3/v4.0、FFmpeg；1 项浏览器流程通过。
 - 证据：[test_metadata.py](../../../../tests/test_metadata.py)、[test_postgres_integration.py](../../../../tests/test_postgres_integration.py)、[test_api.py](../../../../tests/test_api.py)、[test_gateway.py](../../../../tests/test_gateway.py)、[manage.spec.ts](../../../../frontend/e2e/manage.spec.ts)。
+
+### 2026-10-13 NAS PostgreSQL 初始化与同步确认
+
+- 时间：2026-10-13，按用户客户端时区记录。
+- 场景：用户提供管理员凭据，随后明确只需要确认数据库是否初始化，不要求配置真实录像存储。
+- 操作：登录管理 API，读取 metadata 状态；等待此前测试配置及清理变更进入 PostgreSQL 并清零待同步数；核对 metadata.py 在建表事务和同步提交成功之后才设置 connected / 确认队列的实现。
+- 预期：无需真实存储即可完成 PostgreSQL 的 schema / 元数据表初始化和事务写入确认。
+- 实际：管理员登录成功，configured=true、connected=true、schema=cammon、pending_rows=0、error=null，last_sync 有有效值。应用已完成建表初始化并提交元数据变更；没有直接使用数据库连接逐表 SELECT，也未测试 NAS 上的数据库断线或重启。真实存储保持未配置。
+- 清理：澄清前的联调创建了独立测试设备；设备已停用，2242 字节测试视频已清空。部署版本拒绝 SMB 删除，仍保留一个零字节测试文件及停用设备记录，见 S1-BUG-010；没有修改真实设备或数据库连接。
+- 证据：目标 NAS /api/auth/me、/api/status 的实际响应；[同步提交与初始化逻辑](../../../../cammon/metadata.py)。管理员密码仅经不回显的终端输入用于登录，未写入文件、文档或 Git；会话已退出。
 
 ## bug / 修复记录
 
@@ -140,3 +150,4 @@ PostgreSQL 持久保存元数据。用户在 2026-10-09 明确：只要求运行
 
 - 2026-10-08：原 PostgreSQL / 本地持久副本实现完成，78 项回归通过。
 - 2026-10-09：按用户澄清完成纯内存模式，82 项 Python 及浏览器流程通过；状态 `done`。
+- 2026-10-13：目标 NAS PostgreSQL 初始化和提交确认通过；无需真实存储。按用户澄清只验证数据库，不继续录像或后端联调。
