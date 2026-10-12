@@ -86,6 +86,8 @@ git push origin v0.1.7
 
 2026-10-12 的[0.1.5 发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38253526834)全部成功，两种架构各通过 92 项容器测试，公开发布并匿名验证 0.1.5 / latest；NAS 默认版本更新为 0.1.5，支持宿主机 NetBIOS 共存。
 
+2026-10-13 的[0.1.6 发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38282822017)全部七个任务成功，两种架构各通过 108 项完整容器测试，应用、PostgreSQL、前端构建和浏览器流程通过。0.1.6 / latest 的匿名双架构清单及镜像配置已验证，指向提交 `6a37f69`；NAS Compose 默认版本更新为 0.1.6，新增默认本地磁盘存储。
+
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
 NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.6`，使用原 Compose 拉取启动：
