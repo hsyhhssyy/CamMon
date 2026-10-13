@@ -19,6 +19,7 @@ from cammon.archive import Worker
 from cammon.config import Settings
 from cammon.core import Gateway
 from cammon.import_jobs import ImportBusyError, ImportJobs
+from cammon.import_previews import ImportPreviews
 from cammon.importer import RecordingImporter
 from cammon.rpc import Server
 from cammon.samba import SambaManager
@@ -121,6 +122,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         app.state.gateway = g
         imports = ImportJobs(g)
         app.state.imports = imports
+        app.state.import_previews = ImportPreviews(g)
         samba = None
         rpc = None
         worker = None
@@ -155,7 +157,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             if owns_gateway:
                 g.shutdown()
 
-    app = FastAPI(title="CamMon", version="0.1.8", lifespan=lifespan)
+    app = FastAPI(title="CamMon", version="0.1.9", lifespan=lifespan)
 
     @app.middleware("http")
     async def browser_protection(request: Request, call_next):
@@ -276,8 +278,21 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         return RecordingImporter(g).folders(path)
 
     @app.post("/api/import/preview")
-    def preview_import(data: ImportRequest, g: Gateway = auth):
-        return RecordingImporter(g).scan(data.device_id, data.folder, data.recursive)
+    def preview_import(data: ImportRequest, request: Request, g: Gateway = auth):
+        return request.app.state.import_previews.create(data.device_id, data.folder, data.recursive)
+
+    @app.get("/api/import/previews/{preview_id}")
+    def preview_page(preview_id: str, request: Request, offset: int = Query(default=0, ge=0),
+                     limit: int = Query(default=25, ge=1, le=100), g: Gateway = auth):
+        return request.app.state.import_previews.page(preview_id, offset, limit)
+
+    @app.get("/api/import/previews/{preview_id}/thumbnail")
+    def preview_thumbnail(preview_id: str, request: Request, index: int = Query(ge=0), g: Gateway = auth):
+        try:
+            content = request.app.state.import_previews.thumbnail(preview_id, index)
+        except (RuntimeError, TimeoutError) as exc:
+            raise HTTPException(422, "无法解码视频首帧") from exc
+        return Response(content, media_type="image/jpeg")
 
     @app.get("/api/import/jobs")
     def import_jobs(request: Request, g: Gateway = auth):
@@ -335,6 +350,10 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     @app.api_route("/api/files/{recording_id}/stream", methods=["GET", "HEAD"])
     def play_recording(recording_id: int, request: Request, g: Gateway = auth):
         return recording_response(recording_id, request, g, "inline")
+
+    @app.get("/api/files/{recording_id}/thumbnail")
+    def recording_thumbnail(recording_id: int, g: Gateway = auth):
+        return Response(g.thumbnails.recording(recording_id), media_type="image/jpeg")
 
     @app.post("/api/jobs/{job_id}/retry")
     def retry_job(job_id: str, g: Gateway = auth):

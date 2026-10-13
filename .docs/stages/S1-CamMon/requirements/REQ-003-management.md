@@ -66,7 +66,9 @@
 4. Docker host 网络，管理默认 18080；Samba 状态与虚拟目录用 tmpfs，元数据及凭据保存 PostgreSQL，录像缓存允许重启丢失；启动检查具体端口冲突。
 5. 本地磁盘支持浏览文件夹、预览和导入旧录像，按文件名识别 X 与北京时间；直接索引原位置，不复制或占用缓存。相同录像通过大小和 SHA256 核对后关联副本，归档只统计和处理一次，元数据确认后清理；内容不同或无法核对时保留源文件。已有数据禁止直接更换后端地址，不自动迁移。
 6. GitHub Actions 在版本标签推送或手动触发时发布 GHCR 镜像，复用全部检查和编译缓存；amd64 / arm64 原生测试与构建，发布 production 多架构镜像。普通分支与 PR 只执行检查。
-7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.8，host 网络直接监听 TCP 139/445/18080，管理端口可配置。UDP 137/138 默认自动沿用 NAS 已有发现，支持 CAMMON_NETBIOS_MODE=external 显式共存。CI 验证 Public 及匿名镜像访问。本地磁盘为新增默认存储选项，容器路径 `/data` 对应 NAS 的 `/volume1/WebCam`，挂载可通过 CAMMON_STORAGE_PATH 修改。
+7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.9，host 网络直接监听 TCP 139/445/18080，管理端口可配置。UDP 137/138 默认自动沿用 NAS 已有发现，支持 CAMMON_NETBIOS_MODE=external 显式共存。CI 验证 Public 及匿名镜像访问。本地磁盘为新增默认存储选项，容器路径 `/data` 对应 NAS 的 `/volume1/WebCam`，挂载可通过 CAMMON_STORAGE_PATH 修改。
+
+8. 新录像和归档生成首帧 JPEG，图片与视频同后端保存，路径和失败原因保存 PostgreSQL。文件列表采用完整信息卡片；旧录像预览每页 25 个文件，仅当前页逐张生成，换页或离开时停止后续请求，返回已浏览页复用图片；导入复用预览并补齐未预览首帧。无法解码首帧不阻止录像保存或导入。
 
 ## 当前状态视图
 
@@ -91,6 +93,13 @@
 5. 发布流程须先通过应用和协议检查，正确生成稳定、预发布或手动标签；两种架构成功后才发布镜像标签，使用 GITHUB_TOKEN 和小写仓库地址。
 
 ## 测试记录
+
+### 2026-10-13 0.1.9 发布前验收
+
+- 场景：新录像 / 归档首帧、预览分页和缓存复用、旧库升级、重启恢复、移动端卡片及播放 / 下载。
+- 实际结果：162 项非集成测试、22 项 PostgreSQL 测试、4 项浏览器流程、前端生产构建、Ruff 和锁文件检查通过。本机缺少原生 Samba 的 1 项 PostgreSQL 测试等待云端完整容器验收。
+- 证据：[首帧后端验收](../../../../tests/test_thumbnails.py)、[预览浏览器验收](../../../../frontend/e2e/thumbnails.spec.ts)、[归档验收](../../../../tests/test_archive.py)、[数据库升级与重启验收](../../../../tests/test_postgres_integration.py)。
+- 发布状态：准备 v0.1.9；双架构云端检查、GHCR 发布与匿名镜像核验待执行。
 
 ### 2026-10-13 0.1.7 发布前验收
 

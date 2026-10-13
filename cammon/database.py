@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS recordings (
  kind TEXT NOT NULL DEFAULT 'original', state TEXT NOT NULL DEFAULT 'cached', size INTEGER NOT NULL DEFAULT 0,
  created_at REAL NOT NULL, last_write REAL NOT NULL, successor INTEGER NOT NULL DEFAULT 0,
  remote_path TEXT, sha256 TEXT, error TEXT, retry_at REAL NOT NULL DEFAULT 0,
- duration REAL, job_id TEXT
+ duration REAL, job_id TEXT, thumbnail_path TEXT, thumbnail_error TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS live_path ON recordings(device_id,path,kind) WHERE state!='deleted';
 CREATE INDEX IF NOT EXISTS recording_filters ON recordings(state,kind,day,device_id,channel);

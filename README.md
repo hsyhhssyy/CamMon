@@ -2,7 +2,9 @@
 
 CamMon 在 NAS 的 IP 上提供 SMB1 共享和 NetBIOS 发现服务。每台设备拥有独立账号、共享和保留天数；设备内按字符串相机编号 X 管理录像。摄像机写入本地缓存，完成的录像整文件转存至本地磁盘、SMB2/3 或 NFS；默认选择本地磁盘，直接保存到 NAS 挂载目录。过期录像按北京时间自然日生成 60 倍速 H.264 MP4，归档永久保留。
 
-管理页面提供设备配置、后端连接测试、组合统计、分页文件列表、在线播放、字节范围下载、容量告警和归档任务重试。前端资源随镜像提供，运行时无需外部字体或 CDN。
+管理页面提供设备配置、后端连接测试、组合统计、带首帧预览的分页录像列表、在线播放、字节范围下载、容量告警和归档任务重试。前端资源随镜像提供，运行时无需外部字体或 CDN。
+
+新录像落盘和归档视频生成时会提取首帧，JPEG 图片保存在同一存储后端的 `thumbnails/` 目录，关联信息保存在 PostgreSQL。列表用预览图和信息卡片展示完整路径、摄像机、编号、日期、起止时间、时长、大小、类型及状态，支持播放与下载，手机端纵向排布。旧录像导入确认页每页 25 个文件，只对当前页逐张生成首帧，换页或离开后停止继续请求上一页；返回已浏览页会复用预览。导入时复用这些图片，并为尚未预览的录像补齐首帧。首帧无法解码时显示占位，录像仍按原流程保存或导入。已有数据库在启动时自动补充缩略图字段；以前已入库的本地磁盘录像按需生成首帧。
 
 PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部缓存在内存中，PostgreSQL 断线后当前进程继续服务。新增录像使用临时磁盘缓存；重启允许丢失临时录像及未同步变更。
 
@@ -12,14 +14,14 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 ### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.8`，支持 `linux/amd64` 和 `linux/arm64`。0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.9`，支持 `linux/amd64` 和 `linux/arm64`。0.1.9 新增录像及归档首帧缩略图、完整信息卡片和每页 25 个文件的按需导入预览；0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
 test -f .env || cp .env.ghcr.example .env
 chmod 600 .env
 # 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
 # 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.8 \
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.9 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -45,7 +47,7 @@ NAS 的 NetBIOS UDP 端口无法释放时，使用默认 `CAMMON_NETBIOS_MODE=au
 
 共存时使用 NAS 现有的发现名称或直接填写 NAS IP，不会新增独立的 CAMMON 广播名称，也不修改 NAS 的发现服务。NAS 是否广播 SMB 服务器名称、摄像机能否枚举该名称，需要实机确认；直接通过 IP 和生成的共享名接入不依赖 UDP 发现。TCP 139/445 仍须独占。
 
-从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.8` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
+从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.9` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
 
 更新镜像时执行同一组 `pull` 和 `up -d` 命令；查看状态用 `docker compose -f compose.ghcr.yaml ps`，停止服务用 `docker compose -f compose.ghcr.yaml down`。更新重建容器会丢弃临时录像及未同步的内存变更，符合临时缓存约定。
 
@@ -74,11 +76,11 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.9
-git push origin v0.1.9
+git tag v0.1.10
+git push origin v0.1.10
 ```
 
-镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.9` 发布 `0.1.9`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.9-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.10` 发布 `0.1.10`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.10-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
@@ -94,7 +96,7 @@ git push origin v0.1.9
 
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.8`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.9`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py

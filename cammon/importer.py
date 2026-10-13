@@ -49,7 +49,7 @@ class RecordingImporter:
 
     def excluded(self, path: Path) -> bool:
         relative = path.relative_to(self.root)
-        if relative.parts and relative.parts[0] in ("originals", "archives"):
+        if relative.parts and relative.parts[0] in ("originals", "archives", "thumbnails"):
             return True
         return any(path.is_relative_to(private.resolve()) for private in (
             self.gateway.settings.data_dir, self.gateway.settings.cache,
@@ -168,6 +168,9 @@ class RecordingImporter:
         if self.candidate(source) != row:
             raise ValueError("文件在校验后发生变化，请停止写入后重新导入")
         existing, digest = duplicate
+        thumbnail, thumbnail_error = existing["thumbnail_path"], existing["thumbnail_error"]
+        if not thumbnail:
+            thumbnail, thumbnail_error = g.thumbnails.prepare_import(source, self.backend)
         with g.lock:
             if g.backend is not self.backend:
                 raise ValueError("存储配置已改变，请重新预览")
@@ -179,7 +182,9 @@ class RecordingImporter:
                 raise ValueError("摄像机中的录像发生变化，请重新预览")
             g.db.execute("BEGIN IMMEDIATE")
             try:
-                g.db.execute("UPDATE recordings SET sha256=? WHERE id=?", (digest, existing["id"]))
+                g.db.execute("UPDATE recordings SET sha256=?,thumbnail_path=coalesce(thumbnail_path,?),"
+                             "thumbnail_error=CASE WHEN thumbnail_path IS NULL THEN ? ELSE thumbnail_error END "
+                             "WHERE id=?", (digest, thumbnail, thumbnail_error, existing["id"]))
                 g.set_setting(copy_key(row["remote_path"]), {
                     "recording_id": existing["id"], "device_id": device_id,
                     "remote_path": row["remote_path"], "size": row["size"], "sha256": digest,
@@ -197,6 +202,9 @@ class RecordingImporter:
         self.folder(str(source.parent))
         if self.candidate(source) != row:
             raise ValueError("文件在扫描后发生变化，请停止写入后重新导入")
+        thumbnail, thumbnail_error = g.thumbnails.prepare_import(source, self.backend)
+        if self.candidate(source) != row:
+            raise ValueError("文件在提取首帧后发生变化，请停止写入后重新导入")
         with g.lock:
             if g.backend is not self.backend:
                 raise ValueError("存储配置已改变，请重新预览")
@@ -216,9 +224,11 @@ class RecordingImporter:
                 g._mirror_file(device, row["path"])
                 g.db.execute(
                     "INSERT INTO recordings(device_id,path,channel,start,end,day,state,size,created_at,last_write,"
-                    "remote_path,duration) VALUES (:device_id,:path,:channel,:start,:end,:day,'stored',:size,:created_at,"
-                    ":last_write,:remote_path,:duration)",
-                    {**row, "device_id": device_id, "created_at": time.time()},
+                    "remote_path,duration,thumbnail_path,thumbnail_error) "
+                    "VALUES (:device_id,:path,:channel,:start,:end,:day,'stored',:size,:created_at,"
+                    ":last_write,:remote_path,:duration,:thumbnail_path,:thumbnail_error)",
+                    {**row, "device_id": device_id, "created_at": time.time(),
+                     "thumbnail_path": thumbnail, "thumbnail_error": thumbnail_error},
                 )
                 g.db.execute("COMMIT")
             except BaseException:
@@ -227,7 +237,8 @@ class RecordingImporter:
         return None
 
     def scan(self, device_id: str, value: str, recursive: bool = True, *, commit: bool = False,
-             progress: Callable[[dict, str | None, int | None], None] | None = None) -> dict:
+             progress: Callable[[dict, str | None, int | None], None] | None = None,
+             item_limit: int | None = sample_limit) -> dict:
         device = self.gateway.device(device_id, enabled=False)
         folder = self.folder(value)
         cutoff = (datetime.now(TZ).date() - timedelta(days=device["retention_days"] - 1)).isoformat()
@@ -252,13 +263,16 @@ class RecordingImporter:
             item = {"path": source.relative_to(folder).as_posix(), "status": "skipped", "reason": None}
             try:
                 row = self.candidate(source)
+                thumbnail_key = self.gateway.thumbnails.source_key(source)
                 reason = self.existing(device_id, row)
                 duplicate = self.duplicate(device_id, source, row) if not reason else None
             except (OSError, ValueError) as exc:
                 result["skipped"] += 1
                 item["reason"] = str(exc)
             else:
-                item.update(day=row["day"], channel=row["channel"], size=row["size"])
+                item.update(day=row["day"], channel=row["channel"], size=row["size"],
+                            start=row["start"], end=row["end"], duration=row["duration"],
+                            thumbnail_key=thumbnail_key)
                 try:
                     if duplicate:
                         result["copies"] += int(self.link_copy(device_id, source, row, duplicate)) if commit else 1
@@ -278,7 +292,7 @@ class RecordingImporter:
                 except (OSError, ValueError) as exc:
                     result["failed"] += 1
                     item.update(status="failed", reason=str(exc))
-            if len(result["items"]) < self.sample_limit:
+            if item_limit is None or len(result["items"]) < item_limit:
                 result["items"].append(item)
             if progress:
                 progress(result, None, total_files)

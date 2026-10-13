@@ -41,7 +41,7 @@ export default function VideoPlayer({ file }: { file: Recording }) {
 
   return <>
     <div className="player-details"><strong>{file.path.split('/').at(-1)}</strong><p>{file.device_name} · 编号 {file.channel} · {bytes(file.size)}</p><p>{file.kind === 'archive' ? `${file.day} · 60× 归档` : `${datetime(file.start)} → ${datetime(file.end)}`}</p></div>
-    <video ref={videoRef} className="recording-player" src={source} controls playsInline autoPlay preload="metadata" aria-label="录像播放器"
+    <video ref={videoRef} className="recording-player" src={source} poster={file.thumbnail_path ? `/api/files/${file.id}/thumbnail` : undefined} controls playsInline autoPlay preload="metadata" aria-label="录像播放器"
       onLoadedMetadata={() => { setLoading(false); if (videoRef.current) videoRef.current.playbackRate = Number(rate) }}
       onError={() => void playbackError()}>浏览器不支持视频播放，请下载录像查看。</video>
     {loading && <p className="player-loading" role="status">正在加载录像…</p>}

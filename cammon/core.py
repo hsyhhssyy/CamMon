@@ -20,6 +20,7 @@ from cammon.metadata import MetadataSynchronizer
 from cammon.naming import day_slices, directory_path, is_minute_recording, path_parts, recording_path
 from cammon.security import Secrets, password_hash
 from cammon.storage import Backend, file_hash, make_backend, reject_self_storage
+from cammon.thumbnails import Thumbnails
 
 
 @dataclass
@@ -55,6 +56,7 @@ class Gateway:
         settings.secret_key = SecretStr(self.secrets.key.decode())
         self.handles: dict[int, OpenFile] = {}
         self.stopping = threading.Event()
+        self.thumbnails = Thumbnails(self)
         self.backend: Backend | None = None
         self.protocol_error: str | None = None
         self.worker_error: str | None = None
@@ -573,6 +575,7 @@ class Gateway:
                 self.db.execute("UPDATE recordings SET end=start+?,duration=? WHERE id=?",
                                 (duration, duration, row["id"]))
             size, digest = self.publish(self.blob(row["id"]), remote, backend)
+            self.thumbnails.save(row["id"], self.blob(row["id"]), backend)
             with self.lock:
                 self.db.execute("UPDATE recordings SET state='stored',size=?,sha256=?,error=NULL,retry_at=0 WHERE id=?",
                                 (size, digest, row["id"]))

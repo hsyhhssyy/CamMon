@@ -62,12 +62,17 @@ class Archiver(MediaTools):
         output = directory / "archive.mp4"
         remote = f"archives/{job['device_id']}/{job['channel']}/{job['day']}/{job_id}.mp4"
         sources = json.loads(job["sources"])
+        thumbnail_path = None
+        thumbnail_error = None
+        thumbnail_key = f"thumbnails/archives/{job_id}.jpg"
         try:
             already_uploaded = bool(job["output_sha"] and backend.exists(remote) and
                                     backend.stat(remote) == job["output_size"] and backend.sha256(remote) == job["output_sha"])
             if already_uploaded:
                 size, digest = job["output_size"], job["output_sha"]
                 duration = sum(s["length"] for s in sources) / 60
+                if backend.exists(thumbnail_key):
+                    thumbnail_path = thumbnail_key
             else:
                 parts = []
                 width = height = None
@@ -121,6 +126,8 @@ class Archiver(MediaTools):
                     raise ValueError("归档视频编码校验失败")
                 size, digest = output.stat().st_size, file_hash(output, g.stopping)
                 g.db.execute("UPDATE archive_jobs SET output_size=?,output_sha=? WHERE id=?", (size, digest, job_id))
+                thumbnail_path, thumbnail_error = g.thumbnails.prepare_import(
+                    output, backend, destination=thumbnail_key)
                 g.publish(output, remote, backend)
             start = datetime.combine(datetime.fromisoformat(job["day"]).date(), datetime.min.time(), TZ).timestamp()
             with g.lock:
@@ -128,9 +135,11 @@ class Archiver(MediaTools):
                 try:
                     cursor = g.db.execute(
                         "INSERT INTO recordings(device_id,path,channel,start,end,day,kind,state,size,created_at,last_write,"
-                        "remote_path,sha256,duration,job_id) VALUES (?,?,?,?,?,?,'archive','stored',?,?,?,?,?,?,?)",
+                        "remote_path,sha256,duration,job_id,thumbnail_path,thumbnail_error) "
+                        "VALUES (?,?,?,?,?,?,'archive','stored',?,?,?,?,?,?,?,?,?)",
                         (job["device_id"], f"{job['channel']}_{job['day']}_{job_id}.mp4", job["channel"], start,
-                         start + 86400, job["day"], size, time.time(), time.time(), remote, digest, duration, job_id),
+                         start + 86400, job["day"], size, time.time(), time.time(), remote, digest, duration, job_id,
+                         thumbnail_path, thumbnail_error),
                     )
                     archive_id = cursor.lastrowid
                     for source in sources:
@@ -141,6 +150,7 @@ class Archiver(MediaTools):
                 except Exception:
                     g.db.execute("ROLLBACK")
                     raise
+            g.thumbnails.save(archive_id, output if output.exists() else None, backend)
             shutil.rmtree(directory)
             self.collect_originals()
             return True

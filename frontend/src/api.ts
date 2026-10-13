@@ -1,5 +1,5 @@
 export type Device = { id: string; name: string; share: string; username: string; retention_days: number; enabled: number; password?: string }
-export type Recording = { id: number; device_id: string; device_name: string; path: string; channel: string; day: string; start: number; end: number; kind: 'original' | 'archive'; state: string; size: number; error: string | null; duration: number | null }
+export type Recording = { id: number; device_id: string; device_name: string; path: string; channel: string; day: string; start: number; end: number; kind: 'original' | 'archive'; state: string; size: number; error: string | null; duration: number | null; thumbnail_path: string | null; thumbnail_error: string | null }
 export type Storage = { protocol: 'local' | 'smb' | 'nfs'; address: string; username: string; password?: string | null; has_password?: boolean; domain: string; encrypt: boolean; nfs_version: 3 | 4; uid: number; gid: number }
 export type Job = { id: string; day: string; channel: string; device_id: string; status: string; error: string | null }
 export type MetadataStatus = { configured: boolean; connected: boolean; schema: string; pending_rows: number; last_sync: number | null; error: string | null }
@@ -7,7 +7,8 @@ export type Status = { storage_configured: boolean; cache_bytes: number; cache_a
 export type Statistics = { count: number; bytes: number; groups: { day: string; kind: string; count: number; bytes: number }[] }
 export type FilePage = { items: Recording[]; count: number; bytes: number }
 export type ImportFolders = { root: string; path: string; parent: string | null; folders: { name: string; path: string }[] }
-export type ImportReport = { folder: string; device_id: string; recursive: boolean; total: number; importable: number; imported: number; duplicates: number; copies: number; skipped: number; failed: number; bytes: number; expired: number; items: { path: string; status: 'ready' | 'imported' | 'duplicate' | 'skipped' | 'failed'; reason: string | null; day?: string; channel?: string; size?: number; expired?: boolean }[] }
+export type ImportItem = { path: string; status: 'ready' | 'imported' | 'duplicate' | 'skipped' | 'failed'; reason?: string | null; day?: string; channel?: string; size?: number; expired?: boolean; start?: number; end?: number; duration?: number | null; thumbnail_key?: string }
+export type ImportReport = { folder: string; device_id: string; recursive: boolean; total: number; importable: number; imported: number; duplicates: number; copies: number; skipped: number; failed: number; bytes: number; expired: number; items: ImportItem[]; preview_id?: string; offset?: number; limit?: number }
 export type ImportJob = { id: string; folder: string; device_id: string; device_name: string; recursive: boolean; status: 'running' | 'completed' | 'failed'; created_at: number; finished_at: number | null; total_files: number | null; current_path: string | null; report: ImportReport | null; error: string | null }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -36,4 +37,11 @@ export function bytes(value: number): string {
 
 export function datetime(value: number) {
   return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(value * 1000)
+}
+
+export function duration(value: number): string {
+  const seconds = Math.round(value)
+  if (seconds < 60) return `${seconds} 秒`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+  return `${Math.floor(seconds / 3600)} 小时 ${Math.floor(seconds % 3600 / 60)} 分`
 }

@@ -129,17 +129,44 @@ def test_minute_recording_duration_and_directory_survive_restart(pg_gateway, tmp
     drain(g)
     saved = remote_row(g, "recordings", "id", row["id"])
     assert saved["start"] == 1753536633 and saved["end"] == 1753536645.5 and saved["duration"] == 12.5
+    assert saved["thumbnail_path"] == row["thumbnail_path"] and saved["thumbnail_path"]
+    thumbnail = g.thumbnails.recording(row["id"])
     settings = g.settings.model_copy(update={"data_dir": tmp_path / "restored-runtime",
                                             "cache_dir": tmp_path / "restored-cache"})
     g.shutdown()
     restored = Gateway(settings)
     try:
         assert restored.recording(row["id"])["duration"] == 12.5
+        assert restored.recording(row["id"])["thumbnail_path"] == saved["thumbnail_path"]
+        assert restored.thumbnails.recording(row["id"]) == thumbnail
         assert restored.listdir(device["id"], row["path"].rpartition("/")[0]) == [name]
         reader = restored.open(device["id"], row["path"], os.O_RDONLY)
         assert restored.read(reader, len(data), 0) == data
         restored.close(reader)
         assert not list(restored.blobs.iterdir())
+    finally:
+        restored.shutdown()
+
+
+def test_existing_postgres_schema_adds_thumbnail_columns_on_upgrade(pg_gateway, tmp_path):
+    g = pg_gateway
+    device = g.create_device("升级前的摄像机")
+    drain(g)
+    settings = g.settings.model_copy(update={"data_dir": tmp_path / "upgraded-runtime"})
+    g.shutdown()
+    with psycopg.connect(settings.postgres_dsn.get_secret_value(), autocommit=True) as conn:
+        for column in ("thumbnail_path", "thumbnail_error"):
+            conn.execute(sql.SQL("ALTER TABLE {} DROP COLUMN {}").format(
+                sql.Identifier(settings.postgres_schema, "recordings"), sql.Identifier(column)))
+    restored = Gateway(settings)
+    try:
+        assert restored.device(device["id"], enabled=False)["name"] == "升级前的摄像机"
+        restored.mkdir(device["id"], "day")
+        token = create(restored, device)
+        restored.close(token)
+        drain(restored)
+        row = remote_row(restored, "recordings", "id", 1)
+        assert row["thumbnail_path"] is None and row["thumbnail_error"] is None
     finally:
         restored.shutdown()
 

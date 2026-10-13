@@ -81,6 +81,8 @@ def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gat
         assert archiver.process(queued["id"]), job(gateway)["error"]
     rows = gateway.query_files({"kind": "archive"})["items"]
     assert all((root / row["remote_path"]).stat().st_size == row["size"] for row in rows)
+    assert all(row["thumbnail_path"] and row["thumbnail_error"] is None for row in rows)
+    assert all(gateway.thumbnails.recording(row["id"]).startswith(b"\xff\xd8") for row in rows)
     assert {row["channel"] for row in rows} == {"00", "01"}
     assert next(row for row in rows if row["channel"] == "00")["duration"] == pytest.approx(1440, abs=0.2)
     assert next(row for row in rows if row["channel"] == "01")["duration"] == pytest.approx(1, abs=0.2)
@@ -91,6 +93,7 @@ def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gat
     for recording_id in (full_id, short_id):
         virtual = gateway.recording(recording_id)
         assert virtual["state"] == "virtual"
+        assert gateway.thumbnails.recording(recording_id).startswith(b"\xff\xd8")
         assert virtual["duration"] == pytest.approx(virtual["end"] - virtual["start"], abs=0.2)
         assert gateway.stat(device["id"], virtual["path"]) == attributes[recording_id]
     assert not list((root / "originals").rglob("*.mp4"))

@@ -110,6 +110,10 @@ class MetadataSynchronizer:
                 ])
                 conn.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
                     self.table(table), sql.SQL(",").join(definitions)))
+            # Nullable additions also upgrade existing installations before hydration.
+            for column in ("thumbnail_path", "thumbnail_error"):
+                conn.execute(sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} TEXT").format(
+                    self.table("recordings"), sql.Identifier(column)))
             conn.execute(sql.SQL("CREATE INDEX IF NOT EXISTS recording_filters ON {} "
                                  "(state,kind,day,device_id,channel)").format(self.table("recordings")))
         if bootstrap and row:

@@ -9,6 +9,12 @@ test('play, pause, seek, change speed, close and reopen original and archived vi
   await page.getByRole('button', { name: '录像文件', exact: true }).click()
 
   const original = page.getByRole('button', { name: '播放 day/00_20251008080000_20251008080100.mp4', exact: true })
+  const card = page.getByRole('article', { name: 'day/00_20251008080000_20251008080100.mp4', exact: true })
+  await expect(card.locator('img')).toBeVisible()
+  await expect.poll(() => card.locator('img').evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await expect(card.getByText('测试摄像机 · 编号 00')).toBeVisible()
+  await expect(card.getByText('录像时长', { exact: true })).toBeVisible()
+  await page.screenshot({ path: '/tmp/cammon-thumbnail-list.png', fullPage: true })
   const responsePromise = page.waitForResponse(response => response.url().endsWith('/stream') && response.request().method() === 'GET')
   await original.click()
   const response = await responsePromise
@@ -41,6 +47,8 @@ test('play, pause, seek, change speed, close and reopen original and archived vi
   await expect(dialog).toHaveCount(0)
 
   await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.screenshot({ path: '/tmp/cammon-thumbnail-list-mobile.png', fullPage: true })
   await page.getByRole('button', { name: '播放 00_2025-10-08_archive.mp4', exact: true }).click()
   await expect.poll(() => video.evaluate(element => element.readyState)).toBeGreaterThanOrEqual(2)
   await expect(dialog.getByText('归档已按原录像时间压缩 60 倍', { exact: false })).toBeVisible()

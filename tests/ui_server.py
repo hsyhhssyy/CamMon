@@ -7,6 +7,7 @@ from pathlib import Path
 from cammon.api import create_app
 from cammon.config import Settings
 from cammon.core import Gateway
+from cammon.storage import LocalBackend
 
 directory = Path(tempfile.mkdtemp(prefix="cammon-browser-"))
 settings = Settings(_env_file=None, postgres_dsn=None, secret_key=None, admin_username="admin",
@@ -40,4 +41,9 @@ archive_id = gateway.db.execute(
      archive.stat().st_size, row["created_at"], row["last_write"]),
 ).lastrowid
 gateway.blob(archive_id).write_bytes(archive.read_bytes())
+gateway.db.execute("UPDATE recordings SET duration=1 WHERE id=?", (archive_id,))
+# Persist representative first frames without enabling the background worker.
+gateway.backend = LocalBackend(directory / "storage")
+gateway.thumbnails.save(1, gateway.blob(1))
+gateway.thumbnails.save(archive_id, gateway.blob(archive_id))
 app = create_app(settings, gateway)
