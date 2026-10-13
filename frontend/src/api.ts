@@ -8,6 +8,7 @@ export type Statistics = { count: number; bytes: number; groups: { day: string; 
 export type FilePage = { items: Recording[]; count: number; bytes: number }
 export type ImportFolders = { root: string; path: string; parent: string | null; folders: { name: string; path: string }[] }
 export type ImportReport = { folder: string; device_id: string; recursive: boolean; total: number; importable: number; imported: number; duplicates: number; copies: number; skipped: number; failed: number; bytes: number; expired: number; items: { path: string; status: 'ready' | 'imported' | 'duplicate' | 'skipped' | 'failed'; reason: string | null; day?: string; channel?: string; size?: number; expired?: boolean }[] }
+export type ImportJob = { id: string; folder: string; device_id: string; device_name: string; recursive: boolean; status: 'running' | 'completed' | 'failed'; created_at: number; finished_at: number | null; total_files: number | null; current_path: string | null; report: ImportReport | null; error: string | null }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch('/api' + path, {

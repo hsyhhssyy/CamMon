@@ -4,10 +4,12 @@ import hashlib
 import os
 import stat
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from cammon.naming import TZ, day_slices, recording_path
+from cammon.media import MediaTools
+from cammon.naming import TZ, day_slices, is_minute_recording, recording_name
 from cammon.storage import LocalBackend, file_hash, safe_key
 
 COPY_PREFIX = "import-copy:"
@@ -84,14 +86,23 @@ class RecordingImporter:
             raise ValueError("跳过符号链接或非普通文件")
         if info.st_size == 0:
             raise ValueError("文件为空")
-        # Source trees can be arbitrarily deep. The camera namespace permits two
-        # directory levels, so map each source parent to a stable import directory.
+        # Source trees can be arbitrarily deep; map each source parent to a
+        # stable two-level import directory in the camera namespace.
         remote = safe_key(source.relative_to(self.root).as_posix())
         group = hashlib.sha256(source.parent.relative_to(self.root).as_posix().encode()).hexdigest()[:16]
-        path, channel, start, end, day = recording_path(f"imports/{group}/{source.name}")
+        path = f"imports/{group}/{source.name}"
+        channel, start, end, day = recording_name(source.name, source.parent.name)
+        duration = None
+        if is_minute_recording(source.name):
+            duration = MediaTools(self.gateway).probe(source)["duration"]
+            end = start + duration
+            after = source.lstat()
+            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                raise ValueError("文件在读取时长时发生变化，请停止写入后重新导入")
         if end == start:
             raise ValueError("录像起止时间相同，无法生成加速视频")
-        return dict(path=path, channel=channel, start=start, end=end, day=day, size=info.st_size,
+        return dict(path=path, channel=channel, start=start, end=end, day=day, size=info.st_size, duration=duration,
                     remote_path=remote, last_write=info.st_mtime)
 
     def existing(self, device_id: str, row: dict) -> str | None:
@@ -112,11 +123,19 @@ class RecordingImporter:
         return None
 
     def matches(self, device_id: str, row: dict) -> list[dict]:
-        return self.gateway.db.all(
-            "SELECT * FROM recordings WHERE device_id=? AND channel=? AND start=? AND end=? "
+        matches = self.gateway.db.all(
+            "SELECT * FROM recordings WHERE device_id=? AND channel=? AND start=? "
             "AND kind='original' AND state!='deleted' ORDER BY id",
-            (device_id, row["channel"], row["start"], row["end"]),
+            (device_id, row["channel"], row["start"]),
         )
+        # Minute names identify the start independently of video duration, so
+        # conflicting contents must not bypass copy checks by changing the end.
+        # A live minute recording's nominal end is not authoritative either.
+        return [match for match in matches if match["end"] == row["end"] or (
+            is_minute_recording(match["path"]) and (
+                is_minute_recording(row["path"]) or match["state"] in ("cached", "pending", "uploading")
+            )
+        )]
 
     def duplicate(self, device_id: str, source: Path, row: dict) -> tuple[dict, str] | None:
         matches = self.matches(device_id, row)
@@ -197,8 +216,8 @@ class RecordingImporter:
                 g._mirror_file(device, row["path"])
                 g.db.execute(
                     "INSERT INTO recordings(device_id,path,channel,start,end,day,state,size,created_at,last_write,"
-                    "remote_path) VALUES (:device_id,:path,:channel,:start,:end,:day,'stored',:size,:created_at,"
-                    ":last_write,:remote_path)",
+                    "remote_path,duration) VALUES (:device_id,:path,:channel,:start,:end,:day,'stored',:size,:created_at,"
+                    ":last_write,:remote_path,:duration)",
                     {**row, "device_id": device_id, "created_at": time.time()},
                 )
                 g.db.execute("COMMIT")
@@ -207,7 +226,8 @@ class RecordingImporter:
                 raise
         return None
 
-    def scan(self, device_id: str, value: str, recursive: bool = True, *, commit: bool = False) -> dict:
+    def scan(self, device_id: str, value: str, recursive: bool = True, *, commit: bool = False,
+             progress: Callable[[dict, str | None, int | None], None] | None = None) -> dict:
         device = self.gateway.device(device_id, enabled=False)
         folder = self.folder(value)
         cutoff = (datetime.now(TZ).date() - timedelta(days=device["retention_days"] - 1)).isoformat()
@@ -215,7 +235,19 @@ class RecordingImporter:
         result = dict(folder=str(folder), device_id=device_id, recursive=recursive, total=0,
                       importable=0, imported=0, duplicates=0, copies=0, skipped=0, failed=0,
                       bytes=0, expired=0, items=[])
+        total_files = None
+        if progress:
+            progress(result, None, None)
+            total_files = 0
+            for source in self.files(folder, recursive):
+                progress(result, source.relative_to(folder).as_posix(), None)
+                total_files += 1
+            progress(result, None, total_files)
         for source in self.files(folder, recursive):
+            if progress:
+                # Publish the current file before probing video or hashing copies.
+                total_files = max(total_files, result["total"] + 1)
+                progress(result, source.relative_to(folder).as_posix(), total_files)
             result["total"] += 1
             item = {"path": source.relative_to(folder).as_posix(), "status": "skipped", "reason": None}
             try:
@@ -248,4 +280,6 @@ class RecordingImporter:
                     item.update(status="failed", reason=str(exc))
             if len(result["items"]) < self.sample_limit:
                 result["items"].append(item)
+            if progress:
+                progress(result, None, total_files)
         return result

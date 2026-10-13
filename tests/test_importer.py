@@ -24,6 +24,103 @@ def history(gateway):
     return folder
 
 
+def test_minute_history_preview_and_import_preserve_source_and_use_actual_duration(gateway, device, videos):
+    folder = gateway.backend.root / "history" / "xiaomi_camera_videos" / "788b2a487711" / "2025072621"
+    folder.mkdir(parents=True)
+    source = folder / "30M33S_1753536633.mp4"
+    data = videos(12.5, "10")
+    source.write_bytes(data)
+    importer = RecordingImporter(gateway)
+    preview = importer.scan(device["id"], str(folder.parents[2]))
+    assert preview["importable"] == 1 and preview["items"][0]["channel"] == "00"
+    assert gateway.query_files({})["count"] == 0 and source.read_bytes() == data
+    assert importer.scan(device["id"], str(folder.parents[2]), commit=True)["imported"] == 1
+    row = gateway.query_files({})["items"][0]
+    assert row["start"] == 1753536633 and row["end"] == 1753536645.5 and row["duration"] == 12.5
+    assert row["day"] == "2025-07-26" and row["channel"] == "00" and row["state"] == "stored"
+    assert gateway.backend._path(row["remote_path"]) == source and source.read_bytes() == data
+    assert gateway.cache_usage() == 0
+    assert importer.scan(device["id"], str(folder), commit=True)["duplicates"] == 1
+    reader = gateway.open(device["id"], row["path"], os.O_RDONLY)
+    assert gateway.read(reader, len(data), 0) == data
+    gateway.close(reader)
+
+
+def test_minute_history_invalid_names_hours_empty_and_corrupt_files_are_skipped(gateway, device, videos):
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    data = videos(5)
+    (folder / "30M33S_1753536633.mp4").write_bytes(data)
+    (folder / FIRST).write_bytes(b"supported old format")
+    (folder / "31M33S_1753536633.mp4").write_bytes(data)
+    (folder / "32M33S_1753536753.mp4").write_bytes(b"broken video")
+    (folder / "33M33S_1753536813.mp4").touch()
+    wrong_hour = folder / "2025072613"
+    wrong_hour.mkdir()
+    (wrong_hour / "30M33S_1753536633.mp4").write_bytes(data)
+    report = RecordingImporter(gateway).scan(device["id"], str(folder), commit=True)
+    assert report["imported"] == 2 and report["skipped"] == 4 and report["failed"] == 0
+    assert all(item["reason"] for item in report["items"] if item["status"] == "skipped")
+    assert all(source.exists() for source in folder.rglob("*.mp4"))
+
+
+def test_minute_history_links_identical_live_recording_using_probed_end_time(gateway, device, videos):
+    name = "30M33S_1753536633.mp4"
+    data = videos(12.5, "10")
+    writer = gateway.open(device["id"], "day/" + name, os.O_CREAT | os.O_RDWR)
+    gateway.write(writer, data, 0)
+    gateway.close(writer)
+    gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1)
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    (folder / name).write_bytes(data)
+    report = RecordingImporter(gateway).scan(device["id"], str(folder), commit=True)
+    assert report["copies"] == 1 and report["duplicates"] == 1 and report["imported"] == 0
+    assert gateway.query_files({})["count"] == 1
+    assert gateway.get_setting(copy_key("history/" + name))["recording_id"] == 1
+
+
+def test_minute_history_cannot_duplicate_camera_segment_with_temporary_end_time(gateway, device, videos):
+    name = "30M33S_1753536633.mp4"
+    data = videos(12.5, "10")
+    writer = gateway.open(device["id"], "day/" + name, os.O_CREAT | os.O_RDWR)
+    gateway.write(writer, data, 0)
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    (folder / name).write_bytes(data)
+    importer = RecordingImporter(gateway)
+    for state in ("cached", "pending"):
+        report = importer.scan(device["id"], str(folder), commit=True)
+        assert gateway.recording(1)["state"] == state and gateway.recording(1)["duration"] is None
+        assert report["imported"] == 0 and report["copies"] == 0 and report["skipped"] == 1
+        assert "尚未封存" in report["items"][0]["reason"]
+        assert gateway.query_files({})["count"] == 1 and (folder / name).exists()
+        if state == "cached":
+            gateway.close(writer)
+            gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1)
+    report = importer.scan(device["id"], str(folder), commit=True)
+    assert report["copies"] == 1 and report["imported"] == 0 and gateway.query_files({})["count"] == 1
+
+
+def test_minute_history_same_name_with_different_duration_is_preserved_as_conflict(gateway, device, videos):
+    name = "30M33S_1753536633.mp4"
+    writer = gateway.open(device["id"], "day/" + name, os.O_CREAT | os.O_RDWR)
+    gateway.write(writer, videos(12.5, "10"), 0)
+    gateway.close(writer)
+    gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1)
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    different = videos(5)
+    (folder / name).write_bytes(different)
+    report = RecordingImporter(gateway).scan(device["id"], str(folder), commit=True)
+    assert report["skipped"] == 1 and report["imported"] == 0 and report["copies"] == 0
+    assert "内容不同" in report["items"][0]["reason"]
+    assert (folder / name).read_bytes() == different and gateway.query_files({})["count"] == 1
+
+
 def test_preview_then_adopt_nested_recordings_without_copying(gateway, device, history):
     importer = RecordingImporter(gateway)
     preview = importer.scan(device["id"], str(history))

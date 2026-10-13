@@ -2,23 +2,19 @@ import hashlib
 import json
 import logging
 import shutil
-import subprocess
 import threading
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from cammon.importer import COPY_PREFIX, RecordingImporter
+from cammon.media import MediaTools
 from cammon.naming import TZ, day_slices
 from cammon.storage import CHUNK, file_hash
 
 log = logging.getLogger(__name__)
 
 
-class Archiver:
-    def __init__(self, gateway):
-        self.gateway = gateway
-
+class Archiver(MediaTools):
     def enqueue(self, now: float | None = None) -> int:
         g = self.gateway
         today = datetime.fromtimestamp(now or time.time(), TZ).date()
@@ -47,43 +43,9 @@ class Archiver:
                              "VALUES (?,?,?,?,?,?,?)", (job_id, device_id, channel, day, manifest, now_value, now_value))
         return len(groups)
 
-    def probe(self, path: Path) -> dict:
-        result = self._run_process([
-            self.gateway.settings.ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path),
-        ], timeout=120)
-        info = json.loads(result.stdout)
-        videos = [stream for stream in info["streams"] if stream["codec_type"] == "video"]
-        if not videos:
-            raise ValueError("文件没有可解码的视频轨道")
-        return {**videos[0], "duration": float(info["format"]["duration"])}
-
     def _ffmpeg(self, arguments: list[str]):
         command = [self.gateway.settings.ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-xerror", "-y"] + arguments
         self._run_process(command, timeout=24 * 3600, check_space=True)
-
-    def _run_process(self, command, timeout, check_space=False):
-        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
-            deadline = time.monotonic() + timeout
-            try:
-                while True:
-                    if self.gateway.stopping.is_set():
-                        raise InterruptedError("服务正在停止，转码任务将重新入队")
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError("视频处理超时")
-                    if check_space and self.gateway.available() == 0:
-                        raise OSError("本地缓存空间不足，归档源录像已保留")
-                    try:
-                        stdout, stderr = process.communicate(timeout=0.5)
-                        break
-                    except subprocess.TimeoutExpired:
-                        continue
-                if process.returncode:
-                    raise RuntimeError(stderr[-3000:] or "视频处理失败")
-                return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.communicate()
 
     def process(self, job_id: str) -> bool:
         g = self.gateway

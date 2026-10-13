@@ -18,6 +18,7 @@ from starlette.background import BackgroundTask
 from cammon.archive import Worker
 from cammon.config import Settings
 from cammon.core import Gateway
+from cammon.import_jobs import ImportBusyError, ImportJobs
 from cammon.importer import RecordingImporter
 from cammon.rpc import Server
 from cammon.samba import SambaManager
@@ -118,6 +119,8 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         owns_gateway = gateway is None
         g = gateway or Gateway(settings)
         app.state.gateway = g
+        imports = ImportJobs(g)
+        app.state.imports = imports
         samba = None
         rpc = None
         worker = None
@@ -140,6 +143,8 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
                 worker.start()
             yield
         finally:
+            g.stopping.set()
+            imports.stop()
             g.metadata.stop()
             if samba:
                 samba.stop()
@@ -150,7 +155,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             if owns_gateway:
                 g.shutdown()
 
-    app = FastAPI(title="CamMon", version="0.1.6", lifespan=lifespan)
+    app = FastAPI(title="CamMon", version="0.1.8", lifespan=lifespan)
 
     @app.middleware("http")
     async def browser_protection(request: Request, call_next):
@@ -274,9 +279,20 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     def preview_import(data: ImportRequest, g: Gateway = auth):
         return RecordingImporter(g).scan(data.device_id, data.folder, data.recursive)
 
-    @app.post("/api/import")
-    def import_recordings(data: ImportRequest, g: Gateway = auth):
-        return RecordingImporter(g).scan(data.device_id, data.folder, data.recursive, commit=True)
+    @app.get("/api/import/jobs")
+    def import_jobs(request: Request, g: Gateway = auth):
+        return request.app.state.imports.list()
+
+    @app.get("/api/import/jobs/{job_id}")
+    def import_job(job_id: str, request: Request, g: Gateway = auth):
+        return request.app.state.imports.get(job_id)
+
+    @app.post("/api/import", status_code=202)
+    def import_recordings(data: ImportRequest, request: Request, g: Gateway = auth):
+        try:
+            return request.app.state.imports.start(data.device_id, data.folder, data.recursive)
+        except ImportBusyError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.get("/api/stats")
     def stats(query: dict = Depends(filters), g: Gateway = auth):

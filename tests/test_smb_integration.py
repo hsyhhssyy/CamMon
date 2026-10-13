@@ -159,6 +159,47 @@ def test_real_smb1_write_header_rename_flush_and_remote_read(smb_gateway):
         client.close()
 
 
+@pytest.mark.parametrize("dialect", [SMB_DIALECT, SMB2_DIALECT_311], ids=["smb1", "smb3"])
+def test_real_smb_xiaomi_hour_tree_write_seal_and_remote_read(smb_gateway, videos, dialect):
+    gateway, device, _, port, remote = smb_gateway
+    data = videos(12.5, "10")
+    client = connect(device, port, dialect)
+    try:
+        share = device["share"]
+        hour = "xiaomi_camera_videos\\788b2a487711\\2025072621"
+        for depth in range(1, 4):
+            client.createDirectory(share, "\\".join(hour.split("\\")[:depth]))
+        with pytest.raises(SessionError):
+            client.createDirectory(share, hour + "\\deeper")
+        tree = client.connectTree(share)
+        name = hour + "\\30M33S_1753536633.mp4"
+        writer = client.openFile(tree, name, desiredAccess=GENERIC_READ | GENERIC_WRITE,
+                                 creationDisposition=FILE_CREATE)
+        assert client.writeFile(tree, writer, b"0000" + data[4:], 0) == len(data)
+        assert client.writeFile(tree, writer, data[:4], 0) == 4
+        assert client.readFile(tree, writer, 0, len(data)) == data
+        client.closeFile(tree, writer)
+        next_name = hour + "\\31M33S_1753536693.mp4"
+        successor = client.openFile(tree, next_name, desiredAccess=GENERIC_WRITE, creationDisposition=FILE_CREATE)
+        client.writeFile(tree, successor, data, 0)
+        assert gateway.seal_candidates(time.time() + 20) == [1]
+        assert gateway.flush_one(1), gateway.recording(1)["error"]
+        assert gateway.recording(1)["duration"] == 12.5 and gateway.recording(1)["end"] == 1753536645.5
+        assert (remote / gateway.recording(1)["remote_path"]).read_bytes() == data
+        reader = client.openFile(tree, name, desiredAccess=GENERIC_READ, creationDisposition=FILE_OPEN)
+        assert client.readFile(tree, reader, 0, len(data)) == data
+        client.closeFile(tree, reader)
+        entries = client.listPath(share, hour + "\\*")
+        assert {entry.get_longname() for entry in entries if entry.get_longname().endswith(".mp4")} == {
+            "30M33S_1753536633.mp4", "31M33S_1753536693.mp4",
+        }
+        with pytest.raises(SessionError):
+            client.openFile(tree, name, desiredAccess=GENERIC_WRITE, creationDisposition=FILE_OPEN)
+        client.closeFile(tree, successor)
+    finally:
+        client.close()
+
+
 def test_real_smb1_disconnect_releases_writer_and_keeps_channel_independence(smb_gateway):
     gateway, device, _, port, _ = smb_gateway
     client = connect(device, port)

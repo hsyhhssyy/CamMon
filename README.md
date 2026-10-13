@@ -12,14 +12,14 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 ### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.7`，支持 `linux/amd64` 和 `linux/arm64`。0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.8`，支持 `linux/amd64` 和 `linux/arm64`。0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
 test -f .env || cp .env.ghcr.example .env
 chmod 600 .env
 # 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
 # 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.7 \
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.8 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -45,7 +45,7 @@ NAS 的 NetBIOS UDP 端口无法释放时，使用默认 `CAMMON_NETBIOS_MODE=au
 
 共存时使用 NAS 现有的发现名称或直接填写 NAS IP，不会新增独立的 CAMMON 广播名称，也不修改 NAS 的发现服务。NAS 是否广播 SMB 服务器名称、摄像机能否枚举该名称，需要实机确认；直接通过 IP 和生成的共享名接入不依赖 UDP 发现。TCP 139/445 仍须独占。
 
-从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.7` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
+从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.8` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
 
 更新镜像时执行同一组 `pull` 和 `up -d` 命令；查看状态用 `docker compose -f compose.ghcr.yaml ps`，停止服务用 `docker compose -f compose.ghcr.yaml down`。更新重建容器会丢弃临时录像及未同步的内存变更，符合临时缓存约定。
 
@@ -74,11 +74,11 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.8
-git push origin v0.1.8
+git tag v0.1.9
+git push origin v0.1.9
 ```
 
-镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.8` 发布 `0.1.8`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.8-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.9` 发布 `0.1.9`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.9-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
@@ -92,7 +92,7 @@ git push origin v0.1.8
 
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.7`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.8`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py
@@ -130,11 +130,16 @@ PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archi
    - SMB：`smb://192.168.1.10/recordings`，可带端口和共享内子目录，账号、密码、域分别填写。使用 SMB2/3；可要求 SMB3 加密。
    - NFS：`nfs://192.168.1.10/volume1/recordings`，必须填写完整导出目录，选择 NFSv3 或 NFSv4.0。默认 UID/GID 65534；在 NAS 上允许配置的 UID/GID 读写并允许网关 IP 访问导出。
 2. 在“摄像机管理”添加设备并设置保留天数。保存一次性显示的共享路径、用户名和密码，填入摄像机的 NAS 配置。
-3. 为摄像机创建第一层或第二层子文件夹，录像名称使用 `00_20251008080239_20251008082813.mp4`。
+3. 摄像机写入支持 `00_20251008080239_20251008082813.mp4`，也支持小米的 `30M33S_1753536633.mp4` 和自动创建的 `xiaomi_camera_videos/设备标识/年月日小时/` 目录。
 
 摄像机使用各自的接入账号登录后，共享列表只显示该账号对应的摄像机共享，其他设备的共享不可见，也不能通过已知共享名访问。无法手动指定路径的摄像机，可在填写用户名和密码后列出并选择自己的共享文件夹。
 
-共享根目录只允许创建目录，最多两层目录。MP4 位于第一层或第二层目录；X 为数字字符串，`00` 与 `0` 独立。两个时间戳按北京时间解释，时间必须有效，结束不早于开始。随机写入、追加、回改文件头和合法改名均支持；改名后的 X 和时间重新进入索引，目录改名也重新检查深度。缓存录像关闭所有句柄后可以删除，已封存录像不能由摄像机修改、改名或删除。
+共享根目录只允许创建目录。普通目录最多两层；小米目录额外支持三层 `xiaomi_camera_videos/设备标识/YYYYMMDDHH/`，设备标识为 12 位十六进制字符串（MAC 地址去掉冒号），小时目录须为有效的北京时间。录像支持以下两种名称：
+
+- `X_YYYYMMDDHHmmss_YYYYMMDDHHmmss.mp4`：位于第一层或第二层目录，X 为数字字符串，`00` 与 `0` 独立。起止时间按北京时间解释，时间必须有效，结束不早于开始。
+- `mmMssS_UNIX.mp4`：可位于普通目录或小米三层目录，例如 `xiaomi_camera_videos/788b2a487711/2025072621/30M33S_1753536633.mp4`。10 位 Unix 秒级时间戳对应北京时间 `2025-07-26 21:30:33`，分、秒须与前缀一致；父目录若为 10 位年月日小时，也须一致。此格式没有通道和结束时间，统一归入编号 `00`，写入期间暂按 60 秒建立索引，封存后转存前用 ffprobe 读取实际时长并更新结束时间。时长读取失败会保留缓存、显示原因并重试。
+
+随机写入、追加、回改文件头和合法改名均支持；改名后的编号和时间重新进入索引，目录改名也重新检查目录结构和时间。缓存录像关闭所有句柄后可以删除，已封存录像不能由摄像机修改、改名或删除。
 
 设备可以停用和重置接入密码；停用停止摄像机访问，管理页面仍可统计与下载该设备的数据。归档视频只在管理页面可见。
 
@@ -146,7 +151,11 @@ PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archi
 
 使用本地磁盘存储时，可将历史录像放到 NAS 挂载目录中的独立文件夹，例如 `/volume1/WebCam/旧录像`（容器内为 `/data/旧录像`），然后在管理页“旧录像导入”中浏览或填写容器内路径，选择归属摄像机，预览后点击“开始导入”。默认包含所有子文件夹，也可取消递归扫描。已停用的摄像机同样可以接收历史数据。
 
-导入直接为原位置的文件建立索引，不复制视频、不占用录像缓存。源目录层数不限；文件名仍须使用 `X_YYYYMMDDHHmmss_YYYYMMDDHHmmss.mp4`，X 和起止时间按文件名识别，时间按北京时间解释。空文件、时间无效或无法识别的名称会跳过，结果显示导入、重复、可关联副本、跳过和失败数量以及前 100 个文件详情。同一源文件重复导入会跳过，已归入其他摄像机的源文件不会再次归属。CamMon 管理的 `originals/`、`archives/` 和符号链接目录不参与导入。
+点击“开始导入”后，服务端创建后台任务，先统计文件数量，再逐个处理。页面显示已处理 / 总文件数、当前文件和导入、重复、跳过、失败统计；切换页面、刷新或关闭浏览器不会取消任务，重新打开“旧录像导入”会自动恢复最近任务的进度或最终结果。进度查询失败时页面自动重试。一次只执行一个导入任务，重复提交同一运行中的任务会返回原任务。任务状态和最近 10 次结果保存在当前服务进程内；容器或服务重启后不保留任务进度，也不自动续跑，重新导入同一目录会跳过已导入文件。
+
+从 0.1.8 起，`POST /api/import` 返回 HTTP 202 和任务信息；通过 `GET /api/import/jobs/{job_id}` 查询进度与最终结果，`GET /api/import/jobs` 返回最近任务。自定义 API 客户端需改为轮询任务结果。
+
+导入直接为原位置的文件建立索引，不复制视频、不占用录像缓存。源目录层数不限；支持上述两种录像名称。带 X 的名称按文件名识别编号和起止时间；小米 `mmMssS_UNIX.mp4` 统一归入编号 `00`，开始时间取 Unix 秒级时间戳，导入预览和导入时读取实际视频时长来计算结束时间，并校验原目录的小时（若为 10 位时间目录）。所有时间按北京时间显示。空文件、时间无效、无法识别的名称或无法读取时长的小米视频会跳过，结果显示导入、重复、可关联副本、跳过和失败数量以及前 100 个文件详情。同一源文件重复导入会跳过，已归入其他摄像机的源文件不会再次归属。CamMon 管理的 `originals/`、`archives/` 和符号链接目录不参与导入。
 
 目标摄像机已有同名录像（相同 X、起止时间）时，系统进一步核对大小及 SHA256 内容。完全相同的旧目录副本会关联到已有录像，统计和加速视频只计算一次；点击“开始导入”后才保存副本关联，预览不会修改或删除文件。副本关联沿用现有 `settings` 元数据保存到 PostgreSQL。该录像全部日期归档成功、所需元数据持久保存后，摄像机目录的原视频和旧目录的副本都会清理。若录像已归档且留有校验值，副本可在后续定时清理中删除。删除前再次校验副本内容；同名但内容不同、摄像机仍在写入或无法核对内容的文件会保留并显示原因。
 

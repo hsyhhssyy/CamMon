@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -5,6 +7,20 @@ import pytest
 from cammon.config import Settings
 from cammon.core import Gateway
 from cammon.storage import LocalBackend
+
+
+@pytest.fixture
+def videos(tmp_path):
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        pytest.skip("FFmpeg and ffprobe are required for video tests")
+
+    def generate(seconds, rate="1"):
+        path = tmp_path / f"sample-{seconds}.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=blue:s=64x48:r={rate}",
+                        "-t", str(seconds), "-an", "-c:v", "libx264", "-threads", "1", str(path)], check=True)
+        return path.read_bytes()
+
+    return generate
 
 
 @pytest.fixture

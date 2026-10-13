@@ -15,8 +15,9 @@ from pydantic import SecretStr
 
 from cammon.config import Settings
 from cammon.database import Database
+from cammon.media import MediaTools
 from cammon.metadata import MetadataSynchronizer
-from cammon.naming import day_slices, directory_path, path_parts, recording_path
+from cammon.naming import day_slices, directory_path, is_minute_recording, path_parts, recording_path
 from cammon.security import Secrets, password_hash
 from cammon.storage import Backend, file_hash, make_backend, reject_self_storage
 
@@ -567,6 +568,10 @@ class Gateway:
             remote = row["remote_path"] or f"originals/{row['device_id']}/{row['path']}"
             self.db.execute("UPDATE recordings SET state='uploading',remote_path=? WHERE id=?", (remote, row["id"]))
         try:
+            if is_minute_recording(row["path"]) and row["duration"] is None:
+                duration = MediaTools(self).probe(self.blob(row["id"]))["duration"]
+                self.db.execute("UPDATE recordings SET end=start+?,duration=? WHERE id=?",
+                                (duration, duration, row["id"]))
             size, digest = self.publish(self.blob(row["id"]), remote, backend)
             with self.lock:
                 self.db.execute("UPDATE recordings SET state='stored',size=?,sha256=?,error=NULL,retry_at=0 WHERE id=?",

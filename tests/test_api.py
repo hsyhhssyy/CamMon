@@ -1,10 +1,13 @@
 import os
+import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from cammon.api import create_app
+from cammon.importer import RecordingImporter
 from cammon.metadata import MetadataSynchronizer
 from cammon.storage import LocalBackend
 from tests.test_gateway import FIRST, create
@@ -186,11 +189,13 @@ def test_import_browse_preview_commit_and_download(admin, gateway, device):
     assert preview.status_code == 200 and preview.json()["importable"] == 1
     assert admin.get("/api/files").json()["count"] == 0
     result = admin.post("/api/import", json=body)
-    assert result.status_code == 200 and result.json()["imported"] == 1
+    assert result.status_code == 202
+    assert wait_for_import(admin, result.json()["id"])["report"]["imported"] == 1
     row = admin.get("/api/files").json()["items"][0]
     assert row["day"] == "2025-10-08" and row["channel"] == "00"
     assert admin.get(f"/api/files/{row['id']}/download").content == b"old-recording"
-    assert admin.post("/api/import", json=body).json()["duplicates"] == 1
+    repeated = admin.post("/api/import", json=body).json()
+    assert wait_for_import(admin, repeated["id"])["report"]["duplicates"] == 1
     assert admin.get("/api/import/folders", params={"path": str(root.parent)}).status_code == 422
     assert admin.post("/api/import", json={**body, "device_id": "missing"}).status_code == 409
     assert admin.post("/api/import", json={**body, "folder": str(root / "missing")}).status_code == 404
@@ -200,6 +205,8 @@ def test_import_browse_preview_commit_and_download(admin, gateway, device):
 def test_import_requires_authentication_and_write_header(client, gateway, device):
     body = {"folder": str(gateway.backend.root), "device_id": device["id"]}
     assert client.get("/api/import/folders").status_code == 401
+    assert client.get("/api/import/jobs").status_code == 401
+    assert client.get("/api/import/jobs/missing").status_code == 401
     assert client.post("/api/import", json=body).status_code == 403
     assert client.post("/api/import", json=body, headers={"X-CamMon-Request": "1"}).status_code == 401
 
@@ -216,10 +223,145 @@ def test_import_only_duplicate_camera_video_links_copy(admin, gateway, device):
     body = {"device_id": device["id"], "folder": str(folder)}
     preview = admin.post("/api/import/preview", json=body).json()
     assert preview["importable"] == 0 and preview["copies"] == 1
-    report = admin.post("/api/import", json=body).json()
+    job = admin.post("/api/import", json=body).json()
+    report = wait_for_import(admin, job["id"])["report"]
     assert report["copies"] == 1 and report["imported"] == 0
     assert source.exists()
     assert admin.get("/api/files").json()["count"] == 1
+
+
+def wait_for_import(client, job_id):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/import/jobs/{job_id}")
+        assert response.status_code == 200
+        job = response.json()
+        if job["status"] != "running":
+            return job
+        time.sleep(0.01)
+    pytest.fail("Import task did not finish")
+
+
+def test_background_import_progress_reconnect_and_duplicate_submission(admin, gateway, device, monkeypatch):
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    names = ["00_20251008080000_20251008080100.mp4", "01_20251008080000_20251008080100.mp4"]
+    for name in names:
+        (folder / name).write_bytes(b"historical-video")
+    entered, release = threading.Event(), threading.Event()
+    original = RecordingImporter.candidate
+
+    def candidate(self, source):
+        if source.name == names[1]:
+            entered.set()
+            assert release.wait(5), "Test did not release the slow import"
+        return original(self, source)
+
+    monkeypatch.setattr(RecordingImporter, "candidate", candidate)
+    body = {"folder": str(folder), "device_id": device["id"]}
+    assert admin.get("/api/import/jobs").json() == []
+    assert admin.get("/api/import/jobs/missing").status_code == 404
+    try:
+        response = admin.post("/api/import", json=body)
+        assert response.status_code == 202
+        job_id = response.json()["id"]
+        assert entered.wait(5)
+        progress = admin.get(f"/api/import/jobs/{job_id}").json()
+        assert progress["status"] == "running" and progress["total_files"] == 2
+        assert progress["report"]["total"] == 1 and progress["report"]["imported"] == 1
+        assert progress["current_path"] == names[1]
+        assert admin.post("/api/import", json=body).json()["id"] == job_id
+        assert admin.post("/api/import", json={**body, "recursive": False}).status_code == 409
+        # A new browser connection shares the server's task, without restarting its lifespan.
+        reconnected = TestClient(admin.app, cookies=admin.cookies)
+        try:
+            assert reconnected.get("/api/import/jobs").json()[0] == progress
+            release.set()
+            finished = wait_for_import(reconnected, job_id)
+            assert finished["status"] == "completed" and finished["finished_at"]
+            assert finished["report"]["imported"] == 2 and finished["current_path"] is None
+            assert reconnected.get("/api/import/jobs").json()[0] == finished
+        finally:
+            reconnected.close()
+        assert gateway.query_files({})["count"] == 2
+    finally:
+        release.set()
+
+
+def test_background_import_failure_retains_partial_progress_and_can_retry(admin, gateway, device, monkeypatch):
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    for channel in ("00", "01"):
+        (folder / f"{channel}_20251008080000_20251008080100.mp4").write_bytes(b"historical-video")
+    original = RecordingImporter.candidate
+
+    def candidate(self, source):
+        if source.name.startswith("01_"):
+            raise RuntimeError("unexpected scan error")
+        return original(self, source)
+
+    monkeypatch.setattr(RecordingImporter, "candidate", candidate)
+    body = {"folder": str(folder), "device_id": device["id"]}
+    started = admin.post("/api/import", json=body).json()
+    failed = wait_for_import(admin, started["id"])
+    assert failed["status"] == "failed" and failed["error"] == "unexpected scan error"
+    assert failed["report"]["total"] == 1 and failed["report"]["imported"] == 1
+    assert gateway.query_files({})["count"] == 1
+    monkeypatch.setattr(RecordingImporter, "candidate", original)
+    retried = admin.post("/api/import", json=body).json()
+    finished = wait_for_import(admin, retried["id"])
+    assert finished["status"] == "completed"
+    assert finished["report"]["imported"] == 1 and finished["report"]["duplicates"] == 1
+    assert [job["id"] for job in admin.get("/api/import/jobs").json()] == [retried["id"], started["id"]]
+
+
+def test_background_import_history_is_bounded_and_empty_folder_completes(admin, gateway, device):
+    admin.app.state.imports.history_limit = 2
+    folder = gateway.backend.root / "empty"
+    folder.mkdir()
+    ids = []
+    for _ in range(3):
+        job = admin.post("/api/import", json={"device_id": device["id"], "folder": str(folder)}).json()
+        ids.append(job["id"])
+        finished = wait_for_import(admin, job["id"])
+        assert finished["status"] == "completed" and finished["total_files"] == 0
+        assert finished["report"]["total"] == 0
+    assert [job["id"] for job in admin.get("/api/import/jobs").json()] == ids[:0:-1]
+    assert admin.get(f"/api/import/jobs/{ids[0]}").status_code == 404
+
+
+def test_background_import_stop_waits_for_worker_and_retains_committed_files(admin, gateway, device, monkeypatch):
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    for channel in ("00", "01"):
+        (folder / f"{channel}_20251008080000_20251008080100.mp4").write_bytes(b"historical-video")
+    entered, release = threading.Event(), threading.Event()
+    original = RecordingImporter.candidate
+
+    def candidate(self, source):
+        if source.name.startswith("01_"):
+            entered.set()
+            assert release.wait(5)
+        return original(self, source)
+
+    monkeypatch.setattr(RecordingImporter, "candidate", candidate)
+    manager = admin.app.state.imports
+    job = admin.post("/api/import", json={"device_id": device["id"], "folder": str(folder)}).json()
+    stopping = threading.Thread(target=manager.stop)
+    try:
+        assert entered.wait(5)
+        stopping.start()
+        assert manager.stopping.wait(5)
+        assert stopping.is_alive()
+    finally:
+        release.set()
+        if stopping.ident is not None:
+            stopping.join(timeout=5)
+    assert not stopping.is_alive() and not manager.thread.is_alive()
+    stopped = manager.get(job["id"])
+    assert stopped["status"] == "failed" and "导入已中断" in stopped["error"]
+    assert stopped["report"]["imported"] == gateway.query_files({})["count"] == 2
+    assert admin.post("/api/import", json={"device_id": device["id"], "folder": str(folder)}).status_code == 409
 
 
 def test_metadata_health_has_no_connection_credentials(admin):

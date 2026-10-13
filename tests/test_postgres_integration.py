@@ -104,6 +104,46 @@ def remote_row(g, table, column, key):
             sql.Identifier(g.settings.postgres_schema, table), sql.Identifier(column)), (key,)).fetchone()
 
 
+@pytest.mark.parametrize("source_kind", ["camera", "import"])
+def test_minute_recording_duration_and_directory_survive_restart(pg_gateway, tmp_path, videos, source_kind):
+    g = pg_gateway
+    g.configure_storage({"protocol": "local", "address": str(g.backend.root)})
+    device = g.create_device("小米摄像机", 7)
+    directory = "xiaomi_camera_videos/788b2a487711/2025072621"
+    name = "30M33S_1753536633.mp4"
+    data = videos(12.5, "10")
+    if source_kind == "camera":
+        for depth in range(1, 4):
+            g.mkdir(device["id"], "/".join(directory.split("/")[:depth]))
+        writer = g.open(device["id"], f"{directory}/{name}", os.O_CREAT | os.O_RDWR)
+        g.write(writer, data, 0)
+        g.close(writer)
+        g.seal_candidates(g.recording(1)["last_write"] + 1900)
+        assert g.flush_one(1)
+    else:
+        folder = g.backend.root / "history" / directory
+        folder.mkdir(parents=True)
+        (folder / name).write_bytes(data)
+        assert RecordingImporter(g).scan(device["id"], str(folder), commit=True)["imported"] == 1
+    row = g.query_files({})["items"][0]
+    drain(g)
+    saved = remote_row(g, "recordings", "id", row["id"])
+    assert saved["start"] == 1753536633 and saved["end"] == 1753536645.5 and saved["duration"] == 12.5
+    settings = g.settings.model_copy(update={"data_dir": tmp_path / "restored-runtime",
+                                            "cache_dir": tmp_path / "restored-cache"})
+    g.shutdown()
+    restored = Gateway(settings)
+    try:
+        assert restored.recording(row["id"])["duration"] == 12.5
+        assert restored.listdir(device["id"], row["path"].rpartition("/")[0]) == [name]
+        reader = restored.open(device["id"], row["path"], os.O_RDONLY)
+        assert restored.read(reader, len(data), 0) == data
+        restored.close(reader)
+        assert not list(restored.blobs.iterdir())
+    finally:
+        restored.shutdown()
+
+
 def test_imported_recordings_survive_gateway_restart_and_empty_runtime(pg_gateway, tmp_path):
     g = pg_gateway
     g.configure_storage({"protocol": "local", "address": str(g.backend.root)})

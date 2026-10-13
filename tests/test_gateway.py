@@ -10,12 +10,113 @@ from cammon.core import Gateway
 FIRST = "day/00_20251008080000_20251008080100.mp4"
 SECOND = "day/00_20251008080100_20251008080200.mp4"
 OTHER = "day/01_20251008080100_20251008080200.mp4"
+XIAOMI_HOUR = "xiaomi_camera_videos/788b2a487711/2025072621"
+XIAOMI_FIRST = f"{XIAOMI_HOUR}/30M33S_1753536633.mp4"
+XIAOMI_SECOND = f"{XIAOMI_HOUR}/31M33S_1753536693.mp4"
 
 
 def create(gateway, device, path=FIRST, data=b"video-data"):
     token = gateway.open(device["id"], path, os.O_CREAT | os.O_RDWR)
     gateway.write(token, data, 0)
     return token
+
+
+def xiaomi_directories(gateway, device):
+    for depth in range(1, 4):
+        gateway.mkdir(device["id"], "/".join(XIAOMI_HOUR.split("/")[:depth]))
+
+
+def test_minute_camera_write_seal_actual_duration_publish_and_read(gateway, device, videos):
+    xiaomi_directories(gateway, device)
+    data = videos(12.5, "10")
+    writer = create(gateway, device, XIAOMI_FIRST, b"0000" + data[4:100])
+    gateway.write(writer, data[:4], 0)
+    gateway.write(writer, data[100:], 100)
+    reader = gateway.open(device["id"], XIAOMI_FIRST, os.O_RDONLY)
+    assert gateway.read(reader, len(data), 0) == data
+    assert gateway.listdir(device["id"], XIAOMI_HOUR) == [XIAOMI_FIRST.split("/")[-1]]
+    assert gateway.listdir(device["id"], "xiaomi_camera_videos/788b2a487711") == ["2025072621"]
+    before = gateway.stat(device["id"], XIAOMI_FIRST)
+    next_writer = create(gateway, device, XIAOMI_SECOND, videos(20))
+    assert gateway.seal_candidates(time.time() + 20) == []
+    gateway.close(writer)
+    modified = gateway.recording(1)["last_write"]
+    assert gateway.seal_candidates(modified + 9) == []
+    assert gateway.seal_candidates(modified + 11) == [1]
+    assert gateway.recording(1)["duration"] is None
+    assert gateway.flush_one(1), gateway.recording(1)["error"]
+    row = gateway.recording(1)
+    assert row["channel"] == "00" and row["start"] == 1753536633
+    assert row["duration"] == 12.5 and row["end"] == 1753536645.5
+    after = gateway.stat(device["id"], XIAOMI_FIRST)
+    assert after["inode"] == before["inode"] and after["size"] == before["size"]
+    assert gateway.backend._path(row["remote_path"]).read_bytes() == data
+    assert not gateway.blob(1).exists() and gateway.read(reader, len(data), 0) == data
+    gateway.close(reader)
+    stored_reader = gateway.open(device["id"], XIAOMI_FIRST, os.O_RDONLY)
+    assert gateway.read(stored_reader, len(data), 0) == data
+    gateway.close(stored_reader)
+    for operation in (
+        lambda: gateway.open(device["id"], XIAOMI_FIRST, os.O_RDWR),
+        lambda: gateway.unlink(device["id"], XIAOMI_FIRST),
+        lambda: gateway.rename(device["id"], XIAOMI_FIRST, XIAOMI_SECOND),
+    ):
+        with pytest.raises(OSError):
+            operation()
+    gateway.close(next_writer)
+    tail_write = gateway.recording(2)["last_write"]
+    assert gateway.seal_candidates(tail_write + 1799) == []
+    assert gateway.seal_candidates(tail_write + 1801) == [2]
+    assert gateway.flush_one(2) and gateway.recording(2)["duration"] == 20
+
+
+def test_minute_camera_rename_revalidates_name_and_hour_and_can_delete_cached_file(gateway, device):
+    xiaomi_directories(gateway, device)
+    writer = create(gateway, device, XIAOMI_FIRST)
+    inode = gateway.stat(device["id"], XIAOMI_FIRST)["inode"]
+    gateway.rename(device["id"], XIAOMI_FIRST, XIAOMI_SECOND)
+    assert gateway.recording(1)["start"] == 1753536693
+    assert gateway.stat(device["id"], XIAOMI_SECOND)["inode"] == inode
+    assert gateway.read(writer, 10, 0) == b"video-data"
+    with pytest.raises(OSError):
+        gateway.rename(device["id"], XIAOMI_SECOND, XIAOMI_FIRST.replace("30M33S", "29M33S"))
+    with pytest.raises(OSError):
+        gateway.rename(device["id"], XIAOMI_HOUR, XIAOMI_HOUR.replace("2025072621", "2025072620"))
+    gateway.rename(device["id"], "xiaomi_camera_videos/788b2a487711", "xiaomi_camera_videos/001122aabbcc")
+    renamed = XIAOMI_SECOND.replace("788b2a487711", "001122aabbcc")
+    assert gateway.stat(device["id"], renamed)["inode"] == inode
+    gateway.close(writer)
+    gateway.unlink(device["id"], renamed)
+    hour = renamed.rpartition("/")[0]
+    assert gateway.listdir(device["id"], hour) == []
+    gateway.unlink(device["id"], hour, directory=True)
+    assert gateway.query_files({})["count"] == 0
+
+
+def test_minute_probe_failure_keeps_cached_bytes_and_retries(gateway, device, videos):
+    data = videos(5)
+    writer = create(gateway, device, "day/30M33S_1753536633.mp4", data)
+    gateway.close(writer)
+    gateway.seal_candidates(time.time() + 1900)
+    ffprobe = gateway.settings.ffprobe
+    gateway.settings.ffprobe = "/missing-ffprobe"
+    assert not gateway.flush_one(1)
+    assert gateway.blob(1).read_bytes() == data and gateway.recording(1)["state"] == "pending"
+    assert gateway.recording(1)["error"] and gateway.recording(1)["duration"] is None
+    gateway.settings.ffprobe = ffprobe
+    assert gateway.flush_one(1), gateway.recording(1)["error"]
+    assert gateway.recording(1)["duration"] == 5 and gateway.recording(1)["error"] is None
+
+
+def test_corrupt_minute_camera_video_is_preserved_and_reported(gateway, device):
+    writer = create(gateway, device, "day/30M33S_1753536633.mp4", b"broken video")
+    gateway.close(writer)
+    gateway.seal_candidates(time.time() + 1900)
+    assert not gateway.flush_one(1)
+    row = gateway.recording(1)
+    assert row["state"] == "pending" and "无法读取录像时长" in row["error"]
+    assert gateway.blob(1).read_bytes() == b"broken video"
+    assert not gateway.backend.exists(row["remote_path"])
 
 
 @pytest.mark.parametrize("path", [

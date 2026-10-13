@@ -1,7 +1,7 @@
 # NAS deployment using the public image; no GHCR login or local build required.
 services:
   cammon:
-    image: ${CAMMON_IMAGE:-ghcr.io/hsyhhssyy/cammon:0.1.7}
+    image: ${CAMMON_IMAGE:-ghcr.io/hsyhhssyy/cammon:0.1.8}
     pull_policy: missing
     # Listen directly on the NAS IP; host networking does not use ports mappings.
     # SMB: TCP 139/445; existing NAS discovery may keep UDP 137/138.

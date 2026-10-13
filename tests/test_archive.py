@@ -2,7 +2,6 @@ import errno
 import json
 import os
 import shutil
-import subprocess
 import threading
 from datetime import datetime
 
@@ -15,18 +14,6 @@ from cammon.naming import TZ, day_slices
 
 def instant(value):
     return datetime.fromisoformat(value).replace(tzinfo=TZ).timestamp()
-
-
-@pytest.fixture
-def videos(tmp_path):
-    if not shutil.which("ffmpeg"):
-        pytest.skip("FFmpeg is required for archive integration")
-    def generate(seconds, rate="1"):
-        path = tmp_path / f"sample-{seconds}.mp4"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=blue:s=64x48:r={rate}",
-                        "-t", str(seconds), "-an", "-c:v", "libx264", "-threads", "1", str(path)], check=True)
-        return path.read_bytes()
-    return generate
 
 
 def ingest(gateway, device, path, data):
@@ -44,6 +31,40 @@ def job(gateway, day=None):
     if day:
         return gateway.db.one("SELECT * FROM archive_jobs WHERE day=? ORDER BY created_at DESC", (day,))
     return gateway.db.one("SELECT * FROM archive_jobs ORDER BY created_at DESC")
+
+
+@pytest.mark.parametrize("source_kind", ["camera", "import"])
+def test_minute_recording_actual_duration_drives_cross_midnight_archive(gateway, device, videos, source_kind):
+    gateway.update_device(device["id"], {"retention_days": 1})
+    start = instant("2025-10-08T23:59:50")
+    name = f"59M50S_{int(start)}.mp4"
+    data = videos(20)
+    if source_kind == "camera":
+        directory = "xiaomi_camera_videos/788b2a487711/2025100823"
+        for depth in range(1, 4):
+            gateway.mkdir(device["id"], "/".join(directory.split("/")[:depth]))
+        recording_id = ingest(gateway, device, f"{directory}/{name}", data)
+    else:
+        folder = gateway.backend.root / "history" / "2025100823"
+        folder.mkdir(parents=True)
+        (folder / name).write_bytes(data)
+        assert RecordingImporter(gateway).scan(device["id"], str(folder), commit=True)["imported"] == 1
+        recording_id = gateway.query_files({})["items"][0]["id"]
+    row = gateway.recording(recording_id)
+    assert row["channel"] == "00" and row["duration"] == 20 and row["end"] == start + 20
+    original = gateway.backend._path(row["remote_path"])
+    archiver = Archiver(gateway)
+    assert archiver.enqueue(instant("2025-10-09T02:00:00")) == 1
+    first = job(gateway, "2025-10-08")
+    assert json.loads(first["sources"]) == [{"id": recording_id, "offset": 0, "length": 10}]
+    assert archiver.process(first["id"]), job(gateway)["error"]
+    assert original.exists() and gateway.recording(recording_id)["state"] == "stored"
+    assert archiver.enqueue(instant("2025-10-10T02:00:00")) == 1
+    second = job(gateway, "2025-10-09")
+    assert json.loads(second["sources"]) == [{"id": recording_id, "offset": 10, "length": 10}]
+    assert archiver.process(second["id"]), job(gateway)["error"]
+    assert not original.exists() and gateway.recording(recording_id)["state"] == "virtual"
+    assert gateway.stat(device["id"], row["path"])["size"] == len(data)
 
 
 def test_complete_day_is_24_minutes_and_incomplete_day_is_only_recorded_time(gateway, device, videos, tmp_path):
