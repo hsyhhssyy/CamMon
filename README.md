@@ -90,6 +90,8 @@ git push origin v0.1.9
 
 2026-10-13 的[0.1.7 发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38347769327)全部七个任务成功，amd64 / arm64 各通过 157 项完整容器测试，应用、PostgreSQL、前端构建和两项浏览器流程通过。0.1.7 / latest / 0.1 / SHA 标签的匿名双架构清单、版本及源码配置已独立验证，指向提交 `c9d4c0a`，镜像摘要为 `sha256:e04253019377b1c34c84792e89f73d38d35910d0b4afd2ff4041b67713d4624c`；[GitHub Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.7)已正式发布。默认部署版本更新为 0.1.7，包含在线播放、旧录像导入、关联副本清理、归档后虚拟原片和摄像机共享枚举隔离。
 
+2026-10-13 的[0.1.8 发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38408359091)全部七个任务成功，amd64 / arm64 各通过 200 项完整容器测试；154 项非集成、21 项 PostgreSQL、3 项浏览器测试及前端生产构建通过。0.1.8 / latest / 0.1 / SHA 标签的匿名双架构清单、版本及源码配置已独立验证，指向提交 `7ba40c4`，镜像摘要为 `sha256:3e4d71f906cc41d88bbbf80c057d2fe489aae827d4cfea9d2b4af6f86ce0ee45`；[GitHub Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.8)已正式发布。默认部署版本为 0.1.8，新增小米录像格式与三层目录支持、实际时长识别及后台导入进度。
+
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
 NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.8`，使用原 Compose 拉取启动：
