@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 test('play, pause, seek, change speed, close and reopen original and archived video', async ({ page }) => {
   const errors: string[] = []

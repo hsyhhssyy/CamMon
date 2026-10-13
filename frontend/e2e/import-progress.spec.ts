@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import type { ImportJob, ImportReport } from '../src/api'
 
 test('import progress returns after navigation, reload and reopening a closed page', async ({ page, context }) => {

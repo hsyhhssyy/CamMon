@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import type { ImportReport } from '../src/api'
 
 test('import preview generates the current page sequentially and reuses previous page images', async ({ page }) => {

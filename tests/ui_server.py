@@ -9,9 +9,10 @@ from cammon.config import Settings
 from cammon.core import Gateway
 from cammon.storage import LocalBackend
 
-directory = Path(tempfile.mkdtemp(prefix="cammon-browser-"))
+directory = Path(os.environ["CAMMON_BROWSER_TEST_DIR"]) if "CAMMON_BROWSER_TEST_DIR" in os.environ else Path(
+    tempfile.mkdtemp(prefix="cammon-browser-"))
 settings = Settings(_env_file=None, postgres_dsn=None, secret_key=None, admin_username="admin",
-                    data_dir=directory / "data", socket_path=directory / "vfs.sock",
+                    data_dir=directory / "data", cache_dir=directory / "cache", socket_path=directory / "vfs.sock",
                     samba_enabled=False, worker_enabled=False, admin_password="browser-test-password",
                     frontend_dir=Path(__file__).parents[1] / "frontend/dist", cache_reserve_bytes=0)
 gateway = Gateway(settings)
