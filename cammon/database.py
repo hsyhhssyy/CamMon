@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS recordings (
 CREATE UNIQUE INDEX IF NOT EXISTS live_path ON recordings(device_id,path,kind) WHERE state!='deleted';
 CREATE INDEX IF NOT EXISTS recording_filters ON recordings(state,kind,day,device_id,channel);
 CREATE INDEX IF NOT EXISTS channel_timeline ON recordings(device_id,channel,start);
+CREATE INDEX IF NOT EXISTS recording_remote_path ON recordings(remote_path);
 CREATE TABLE IF NOT EXISTS archive_jobs (
  id TEXT PRIMARY KEY, device_id TEXT NOT NULL, channel TEXT NOT NULL, day TEXT NOT NULL,
  sources TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', error TEXT,

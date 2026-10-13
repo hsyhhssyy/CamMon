@@ -120,6 +120,7 @@ class SambaManager:
     read only = no
     guest ok = no
     browseable = yes
+    access based share enum = yes
     vfs objects = cammon
     cammon:device = {device['id']}
     cammon:socket = {self.settings.socket_path}

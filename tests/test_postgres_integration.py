@@ -18,6 +18,7 @@ from psycopg import sql
 from pydantic import SecretStr
 
 from cammon.core import Gateway
+from cammon.importer import RecordingImporter, copy_key
 from cammon.metadata import MetadataBootstrapError, MetadataSynchronizer
 from cammon.storage import LocalBackend
 from tests.test_gateway import FIRST, create
@@ -101,6 +102,88 @@ def remote_row(g, table, column, key):
         conn.row_factory = psycopg.rows.dict_row
         return conn.execute(sql.SQL("SELECT * FROM {} WHERE {}=%s").format(
             sql.Identifier(g.settings.postgres_schema, table), sql.Identifier(column)), (key,)).fetchone()
+
+
+def test_imported_recordings_survive_gateway_restart_and_empty_runtime(pg_gateway, tmp_path):
+    g = pg_gateway
+    g.configure_storage({"protocol": "local", "address": str(g.backend.root)})
+    device = g.create_device("历史数据摄像机", 7)
+    folder = g.backend.root / "history"
+    folder.mkdir()
+    source = folder / "00_20251008080000_20251008080100.mp4"
+    source.write_bytes(b"historical-recording")
+    report = RecordingImporter(g).scan(device["id"], str(folder), commit=True)
+    assert report["imported"] == 1
+    row = g.query_files({})["items"][0]
+    drain(g)
+    assert remote_row(g, "recordings", "id", row["id"])["remote_path"] == "history/" + source.name
+    settings = g.settings.model_copy(update={"data_dir": tmp_path / "empty-runtime",
+                                            "cache_dir": tmp_path / "empty-cache"})
+    g.shutdown()
+    restored = Gateway(settings)
+    try:
+        assert restored.query_files({})["count"] == 1
+        assert restored.recording(row["id"])["state"] == "stored"
+        assert restored._projection(device, row["path"]).exists()
+        token = restored.open_recording(row["id"])
+        try:
+            assert restored.read(token, 1024, 0) == b"historical-recording"
+        finally:
+            restored.close(token)
+        assert RecordingImporter(restored).scan(device["id"], str(folder), commit=True)["duplicates"] == 1
+        assert source.exists() and not list(restored.blobs.iterdir())
+    finally:
+        restored.shutdown()
+
+
+def test_import_duplicate_link_survives_restart_and_cleanup_waits_for_postgres(pg_gateway, tmp_path):
+    from cammon.archive import Archiver
+    from tests.test_archive import ingest, instant
+
+    g = pg_gateway
+    g.configure_storage({"protocol": "local", "address": str(g.backend.root)})
+    device = g.create_device("历史数据摄像机", 1)
+    g.mkdir(device["id"], "day")
+    sample = tmp_path / "sample.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=64x48:r=1",
+                    "-t", "60", "-an", "-c:v", "libx264", "-threads", "1", str(sample)], check=True)
+    original_id = ingest(g, device, FIRST, sample.read_bytes())
+    folder = g.backend.root / "history"
+    folder.mkdir()
+    source = folder / FIRST.split("/")[-1]
+    source.write_bytes(sample.read_bytes())
+    key = copy_key("history/" + source.name)
+    report = RecordingImporter(g).scan(device["id"], str(folder), commit=True)
+    assert report["copies"] == 1 and report["imported"] == 0
+    drain(g)
+    assert json.loads(remote_row(g, "settings", "key", key)["value"])["recording_id"] == original_id
+    settings = g.settings.model_copy(update={"data_dir": tmp_path / "empty-runtime",
+                                            "cache_dir": tmp_path / "empty-cache"})
+    g.shutdown()
+    restored = Gateway(settings)
+    try:
+        assert restored.get_setting(key)["recording_id"] == original_id
+        assert restored.query_files({})["count"] == 1
+        archiver = Archiver(restored)
+        archiver.enqueue(instant("2025-10-09T02:00:00"))
+        queued = restored.db.one("SELECT * FROM archive_jobs")
+        assert len(json.loads(queued["sources"])) == 1
+        assert archiver.process(queued["id"])
+        assert source.exists()  # Archive/coverage have not been synced yet.
+        original_remote = restored.recording(original_id)["remote_path"]
+        assert restored.backend.exists(original_remote)
+        drain(restored)
+        archiver.collect_originals()
+        assert not restored.backend.exists(original_remote)
+        assert source.exists()  # The virtual state is still awaiting acknowledgement.
+        drain(restored)
+        archiver.collect_originals()
+        assert not source.exists() and restored.get_setting(key) is None
+        assert restored.query_files({"kind": "archive"})["count"] == 1
+        drain(restored)
+        assert remote_row(restored, "settings", "key", key) is None
+    finally:
+        restored.shutdown()
 
 
 def test_migrates_existing_metadata_and_preserves_all_tables(pg_gateway):
@@ -468,6 +551,7 @@ def test_archive_preserves_old_sources_until_postgres_confirms_and_survives_memo
     g.mkdir(device["id"], "day")
     source_id = ingest(g, device, FIRST, sample.read_bytes())
     source_remote = g.recording(source_id)["remote_path"]
+    source_attributes = g.stat(device["id"], FIRST)
     archiver = Archiver(g)
     assert archiver.enqueue(instant("2025-10-09T02:00:00")) == 1
     job_id = g.db.one("SELECT id FROM archive_jobs")["id"]
@@ -491,9 +575,30 @@ def test_archive_preserves_old_sources_until_postgres_confirms_and_survives_memo
         archiver.collect_originals()
         drain(rebooted)
         assert not rebooted.backend.exists(source_remote)
+        assert rebooted.recording(source_id)["state"] == "virtual"
+        assert rebooted.stat(device["id"], FIRST) == source_attributes
         archived = rebooted.query_files({"kind": "archive"})["items"]
         assert len(archived) == 1 and rebooted.backend.exists(archived[0]["remote_path"])
         assert remote_row(rebooted, "recordings", "id", archived[0]["id"])["kind"] == "archive"
+        assert remote_row(rebooted, "recordings", "id", source_id)["state"] == "virtual"
+        assert remote_row(rebooted, "recordings", "id", source_id)["duration"] == pytest.approx(60)
+        rebooted.metadata.stop()
+        empty = settings.model_copy(update={"data_dir": tmp_path / "empty-runtime",
+                                            "cache_dir": tmp_path / "empty-cache"})
+        restored = Gateway(empty)
+        try:
+            assert restored.recording(source_id)["state"] == "virtual"
+            assert restored.stat(device["id"], FIRST) == source_attributes
+            assert restored.listdir(device["id"], "day") == [FIRST.split("/")[-1]]
+            assert restored._projection(device, FIRST).stat().st_size == 0
+            assert not list(restored.blobs.iterdir())
+            assert restored.query_files({})["count"] == 1
+            with pytest.raises(FileExistsError):
+                restored.open(device["id"], FIRST, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            token = restored.open(device["id"], FIRST, os.O_RDONLY)
+            restored.close(token)
+        finally:
+            restored.shutdown()
     finally:
         rebooted.shutdown()
 

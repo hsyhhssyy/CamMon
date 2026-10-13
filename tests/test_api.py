@@ -49,25 +49,70 @@ def test_composite_filters_and_validation(admin, gateway, device):
     ("bytes=-4", b"data", 206), ("bytes=0-9999", b"video-data", 206),
     ("bytes=100-", b"", 416), ("bytes=0-2,4-6", b"", 416), ("bytes=-0", b"", 416),
 ])
-def test_download_ranges(admin, gateway, device, header, content, status):
+@pytest.mark.parametrize("endpoint,disposition", [("download", "attachment"), ("stream", "inline")])
+def test_recording_ranges(admin, gateway, device, header, content, status, endpoint, disposition):
     token = create(gateway, device)
     gateway.close(token)
     headers = {"Range": header} if header else {}
-    response = admin.get("/api/files/1/download", headers=headers)
+    response = admin.get(f"/api/files/1/{endpoint}", headers=headers)
     assert response.status_code == status
     if status != 416:
         assert response.content == content
         assert int(response.headers["content-length"]) == len(content)
+        assert response.headers["content-type"] == "video/mp4"
+        assert response.headers["content-disposition"].startswith(disposition + ";")
+        assert response.headers["accept-ranges"] == "bytes"
+        assert response.headers["cache-control"] == "no-store"
+        if status == 206:
+            assert response.headers["content-range"].endswith("/10")
     assert not gateway.handles
 
 
-def test_head_empty_file_and_logout(admin, gateway, device):
+@pytest.mark.parametrize("endpoint", ["download", "stream"])
+def test_head_empty_file_and_logout(admin, gateway, device, endpoint):
     token = gateway.open(device["id"], FIRST, os.O_CREAT | os.O_RDWR)
     gateway.close(token)
-    assert admin.get("/api/files/1/download").content == b""
-    assert admin.head("/api/files/1/download").headers["content-length"] == "0"
+    assert admin.get(f"/api/files/1/{endpoint}").content == b""
+    assert admin.head(f"/api/files/1/{endpoint}").headers["content-length"] == "0"
+    assert not gateway.handles
     assert admin.post("/api/auth/logout").status_code == 200
     assert admin.get("/api/devices").status_code == 401
+    assert admin.get(f"/api/files/1/{endpoint}").status_code == 401
+    assert admin.head(f"/api/files/1/{endpoint}").status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", ["download", "stream"])
+def test_virtual_original_is_excluded_from_storage_totals_and_content(admin, gateway, device, endpoint):
+    token = create(gateway, device)
+    gateway.close(token)
+    gateway.db.execute("UPDATE recordings SET state='virtual',duration=end-start WHERE id=1")
+    gateway.blob(1).unlink()
+    assert gateway.stat(device["id"], FIRST)["size"] == 10
+    assert admin.get("/api/files").json()["items"] == []
+    assert admin.get("/api/stats").json()["bytes"] == 0
+    for method in (admin.get, admin.head):
+        assert method(f"/api/files/1/{endpoint}").status_code == 410
+        assert method(f"/api/files/1/{endpoint}", headers={"Range": "bytes=0-4"}).status_code == 410
+    assert not gateway.handles
+
+
+@pytest.mark.parametrize("kind", ["original", "archive"])
+def test_stream_stored_recording_and_head_seek(admin, gateway, device, kind):
+    token = create(gateway, device)
+    gateway.close(token)
+    gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1)
+    gateway.db.execute("UPDATE recordings SET kind=? WHERE id=1", (kind,))
+    assert not gateway.blob(1).exists()
+    response = admin.head("/api/files/1/stream", headers={"Range": "bytes=6-"})
+    assert response.status_code == 206 and not response.content
+    assert response.headers["content-length"] == "4"
+    assert response.headers["content-range"] == "bytes 6-9/10"
+    assert not gateway.handles
+    response = admin.get("/api/files/1/stream", headers={"Range": "bytes=6-"})
+    assert response.status_code == 206 and response.content == b"data"
+    assert not gateway.handles
+    assert admin.get("/api/files/9999/stream").status_code == 404
 
 
 def test_storage_password_is_encrypted_and_destination_locked(admin, gateway, device, monkeypatch, tmp_path):
@@ -126,6 +171,55 @@ def test_device_create_and_edit(admin):
     assert "password" not in admin.get("/api/devices").json()[0]
     assert admin.patch(f"/api/devices/{device['id']}", json={"retention_days": 0}).status_code == 422
     assert admin.patch(f"/api/devices/{device['id']}", json={"enabled": False}).json()["enabled"] == 0
+
+
+def test_import_browse_preview_commit_and_download(admin, gateway, device):
+    root = gateway.backend.root
+    folder = root / "history"
+    folder.mkdir()
+    name = "00_20251008080000_20251008080100.mp4"
+    (folder / name).write_bytes(b"old-recording")
+    listing = admin.get("/api/import/folders").json()
+    assert listing["root"] == str(root) and listing["folders"][0]["name"] == "history"
+    body = {"folder": str(folder), "device_id": device["id"]}
+    preview = admin.post("/api/import/preview", json=body)
+    assert preview.status_code == 200 and preview.json()["importable"] == 1
+    assert admin.get("/api/files").json()["count"] == 0
+    result = admin.post("/api/import", json=body)
+    assert result.status_code == 200 and result.json()["imported"] == 1
+    row = admin.get("/api/files").json()["items"][0]
+    assert row["day"] == "2025-10-08" and row["channel"] == "00"
+    assert admin.get(f"/api/files/{row['id']}/download").content == b"old-recording"
+    assert admin.post("/api/import", json=body).json()["duplicates"] == 1
+    assert admin.get("/api/import/folders", params={"path": str(root.parent)}).status_code == 422
+    assert admin.post("/api/import", json={**body, "device_id": "missing"}).status_code == 409
+    assert admin.post("/api/import", json={**body, "folder": str(root / "missing")}).status_code == 404
+    assert admin.post("/api/import", json={"device_id": device["id"]}).status_code == 422
+
+
+def test_import_requires_authentication_and_write_header(client, gateway, device):
+    body = {"folder": str(gateway.backend.root), "device_id": device["id"]}
+    assert client.get("/api/import/folders").status_code == 401
+    assert client.post("/api/import", json=body).status_code == 403
+    assert client.post("/api/import", json=body, headers={"X-CamMon-Request": "1"}).status_code == 401
+
+
+def test_import_only_duplicate_camera_video_links_copy(admin, gateway, device):
+    token = create(gateway, device)
+    gateway.close(token)
+    gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1)
+    folder = gateway.backend.root / "history"
+    folder.mkdir()
+    source = folder / FIRST.split("/")[-1]
+    source.write_bytes(b"video-data")
+    body = {"device_id": device["id"], "folder": str(folder)}
+    preview = admin.post("/api/import/preview", json=body).json()
+    assert preview["importable"] == 0 and preview["copies"] == 1
+    report = admin.post("/api/import", json=body).json()
+    assert report["copies"] == 1 and report["imported"] == 0
+    assert source.exists()
+    assert admin.get("/api/files").json()["count"] == 1
 
 
 def test_metadata_health_has_no_connection_credentials(admin):

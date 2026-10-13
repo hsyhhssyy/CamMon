@@ -16,7 +16,7 @@ from pydantic import SecretStr
 from cammon.config import Settings
 from cammon.database import Database
 from cammon.metadata import MetadataSynchronizer
-from cammon.naming import directory_path, path_parts, recording_path
+from cammon.naming import day_slices, directory_path, path_parts, recording_path
 from cammon.security import Secrets, password_hash
 from cammon.storage import Backend, file_hash, make_backend, reject_self_storage
 
@@ -349,9 +349,10 @@ class Gateway:
         if row["state"] == "deleting":
             raise FileNotFoundError(row["path"])
         fd = None
-        if self.blob(row["id"]).exists():
+        # Virtual recordings have metadata handles without any video backing.
+        if row["state"] != "virtual" and self.blob(row["id"]).exists():
             fd = os.open(self.blob(row["id"]), os.O_RDWR if writable else os.O_RDONLY)
-        elif row["state"] != "stored":
+        elif row["state"] not in ("stored", "virtual"):
             raise OSError(errno.EIO, "Recording cache is missing")
         self._handle_counter += 1
         token = self._handle_counter
@@ -360,7 +361,10 @@ class Gateway:
 
     def open_recording(self, recording_id: int, session: str = "http") -> int:
         with self.lock:
-            return self._new_handle(self.recording(recording_id), False, session)
+            row = self.recording(recording_id)
+            if row["state"] == "virtual":
+                raise FileNotFoundError("原录像已归档，仅保留文件信息")
+            return self._new_handle(row, False, session)
 
     def handle(self, token: int, writable: bool = False) -> OpenFile:
         handle = self.handles.get(token)
@@ -379,6 +383,8 @@ class Gateway:
         with handle.lock:
             if handle.closed:
                 raise OSError(errno.EBADF, "File handle is closed")
+            if row["state"] == "virtual":
+                raise OSError(errno.ENODATA, "原录像已归档，仅保留文件信息")
             if handle.fd is not None:
                 return os.pread(handle.fd, count, offset)
             if not handle.remote:
@@ -586,6 +592,7 @@ class Gateway:
                             "WHERE state IN ('cached','pending','uploading')")
             self.db.execute("UPDATE recordings SET state='stored' WHERE state='deleting'")
             self.db.execute("UPDATE archive_jobs SET status='queued' WHERE status='running'")
+            self._restore_archived_paths()
             for device in self.devices():
                 self._mirror_directory(device, "")
                 for row in self.db.all("SELECT path FROM directories WHERE device_id=? ORDER BY length(path)", (device["id"],)):
@@ -593,6 +600,29 @@ class Gateway:
                 for row in self.db.all("SELECT * FROM recordings WHERE device_id=? AND kind='original' AND state!='deleted'",
                                        (device["id"],)):
                     self._mirror_file(device, row["path"])
+
+    def _restore_archived_paths(self):
+        """Restore retention tombstones created before virtual recordings existed."""
+        rows = self.db.all("SELECT r.* FROM recordings r WHERE r.kind='original' AND r.state='deleted' "
+                           "AND EXISTS (SELECT 1 FROM coverage c WHERE c.recording_id=r.id) ORDER BY r.id DESC")
+        for row in rows:
+            if self.by_path(row["device_id"], row["path"]):
+                continue  # An existing file at the same path takes precedence.
+            days = day_slices(row["start"], row["end"])
+            if not days or not all(self.db.one(
+                "SELECT 1 FROM coverage c JOIN archive_jobs j ON j.id=c.job_id "
+                "JOIN recordings a ON a.id=j.archive_id WHERE c.recording_id=? AND c.day=? "
+                "AND j.status='done' AND a.kind='archive' AND a.state='stored'",
+                (row["id"], day),
+            ) for day, _, _ in days):
+                continue
+            # Older cameras could remove empty parent folders after retention.
+            parts = path_parts(row["path"])
+            for depth in range(1, len(parts)):
+                self.db.execute("INSERT OR IGNORE INTO directories(device_id,path,modified_at) VALUES (?,?,?)",
+                                (row["device_id"], "/".join(parts[:depth]), row["last_write"]))
+            self.db.execute("UPDATE recordings SET state='virtual',duration=coalesce(duration,end-start),"
+                            "error=NULL,retry_at=0 WHERE id=?", (row["id"],))
 
     def query_files(self, filters: dict, limit: int = 100, offset: int = 0) -> dict:
         where, args = self._filters(filters)
@@ -610,7 +640,7 @@ class Gateway:
 
     @staticmethod
     def _filters(filters: dict) -> tuple[str, list]:
-        parts, args = ["r.state!='deleted'"], []
+        parts, args = ["r.state NOT IN ('deleted','virtual')"], []
         for key in ("device_id", "channel", "kind", "day"):
             if filters.get(key) is not None:
                 parts.append(f"r.{key}=?")

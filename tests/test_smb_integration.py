@@ -17,16 +17,18 @@ import pytest
 from fastapi.testclient import TestClient
 from impacket.nmb import NetBIOS
 from impacket.smb import SMB_DIALECT
-from impacket.smb3structs import FILE_CREATE, FILE_OPEN, GENERIC_READ, GENERIC_WRITE
+from impacket.smb3structs import FILE_CREATE, FILE_OPEN, GENERIC_READ, GENERIC_WRITE, SMB2_DIALECT_311
 from impacket.smbconnection import SessionError, SMBConnection
 
 from cammon.api import create_app
+from cammon.archive import Archiver
 from cammon.config import Settings
 from cammon.core import Gateway
 from cammon.rpc import Server
 from cammon.samba import SambaManager
 from cammon.storage import SMBBackend
 from tests.backend_faults import verify_interrupted_upload_and_retry
+from tests.test_archive import instant
 
 pytestmark = [pytest.mark.integration, pytest.mark.smb]
 
@@ -57,6 +59,7 @@ def smb_gateway(tmp_path):
     remote.mkdir(mode=0o700)
     os.chown(remote, device["uid"], device["gid"])
     config = settings.samba_config.read_text().replace("[global]", f"[global]\n    smb ports = {port}\n"
+                                                     f"    ncalrpc dir = {tmp_path / 'ncalrpc'}\n"
                                                      "    interfaces = 127.0.0.1\n    bind interfaces only = yes")
     config = config.replace("log file = /dev/stdout", f"log file = {tmp_path / 'samba.log'}")
     config = config.replace("[global]", "[global]\n    log level = 3")
@@ -91,11 +94,28 @@ def smb_gateway(tmp_path):
             subprocess.run(["userdel", created["username"]], capture_output=True)
 
 
-def connect(device, port):
-    client = SMBConnection("127.0.0.1", "127.0.0.1", sess_port=port, preferredDialect=SMB_DIALECT)
+def connect(device, port, dialect=SMB_DIALECT):
+    client = SMBConnection("127.0.0.1", "127.0.0.1", sess_port=port, preferredDialect=dialect)
     client.login(device["username"], device["password"])
-    assert client.getDialect() == SMB_DIALECT
+    assert client.getDialect() == dialect
     return client
+
+
+@pytest.mark.parametrize("dialect", [SMB_DIALECT, SMB2_DIALECT_311], ids=["smb1", "smb3"])
+def test_share_enumeration_only_lists_the_logged_in_camera(smb_gateway, dialect):
+    _, device, other, port, _ = smb_gateway
+    camera_shares = {device["share"], other["share"]}
+    for owner, forbidden in ((device, other), (other, device)):
+        client = connect(owner, port, dialect)
+        try:
+            visible = {entry["shi1_netname"].rstrip("\x00") for entry in client.listShares()}
+            assert visible & camera_shares == {owner["share"]}, visible
+            tree = client.connectTree(owner["share"])
+            client.disconnectTree(tree)
+            with pytest.raises(SessionError):
+                client.connectTree(forbidden["share"])
+        finally:
+            client.close()
 
 
 def test_real_smb1_write_header_rename_flush_and_remote_read(smb_gateway):
@@ -158,6 +178,50 @@ def test_real_smb1_disconnect_releases_writer_and_keeps_channel_independence(smb
         time.sleep(0.1)
     assert not gateway.handles
     assert gateway.seal_candidates(time.time() + 1900) == [1, 2]
+
+
+def test_real_smb1_archived_original_keeps_its_name_and_size(smb_gateway, tmp_path):
+    gateway, device, _, port, remote = smb_gateway
+    sample = tmp_path / "video.mp4"
+    subprocess.run([gateway.settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=blue:s=64x48:r=1", "-t", "60", "-an", "-c:v", "libx264",
+                    "-threads", "1", str(sample)], check=True)
+    data = sample.read_bytes()
+    client = connect(device, port)
+    try:
+        client.createDirectory(device["share"], "day")
+        tree = client.connectTree(device["share"])
+        name = "day\\00_20251008080000_20251008080100.mp4"
+        writer = client.openFile(tree, name, desiredAccess=GENERIC_READ | GENERIC_WRITE,
+                                 creationDisposition=FILE_CREATE)
+        assert client.writeFile(tree, writer, data, 0) == len(data)
+        client.closeFile(tree, writer)
+        assert gateway.seal_candidates(time.time() + 1900) == [1]
+        assert gateway.flush_one(1)
+        original = remote / gateway.recording(1)["remote_path"]
+        archiver = Archiver(gateway)
+        assert archiver.enqueue(instant("2025-12-01T02:00:00")) == 1
+        job = gateway.db.one("SELECT id FROM archive_jobs")
+        assert archiver.process(job["id"]), gateway.db.one("SELECT error FROM archive_jobs")["error"]
+        assert gateway.recording(1)["state"] == "virtual"
+        assert not original.exists()
+        assert not gateway.blob(1).exists()
+        entry = next(e for e in client.listPath(device["share"], "day\\*") if e.get_longname().endswith(".mp4"))
+        assert entry.get_filesize() == len(data)
+        reader = client.openFile(tree, name, desiredAccess=GENERIC_READ, creationDisposition=FILE_OPEN)
+        assert client.queryInfo(tree, reader)["EndOfFile"] == len(data)
+        with pytest.raises(SessionError):
+            client.readFile(tree, reader, 0, 16)
+        assert client.queryInfo(tree, reader)["EndOfFile"] == len(data)
+        client.closeFile(tree, reader)
+        for access, disposition in ((GENERIC_WRITE, FILE_OPEN), (GENERIC_WRITE, FILE_CREATE)):
+            with pytest.raises(SessionError):
+                client.openFile(tree, name, desiredAccess=access, creationDisposition=disposition)
+        with pytest.raises(SessionError):
+            client.deleteFile(device["share"], name)
+        assert gateway.query_files({"kind": "original"})["count"] == 0
+    finally:
+        client.close()
 
 
 def test_smb_backend_interruption_space_and_restart(smb_gateway, monkeypatch):

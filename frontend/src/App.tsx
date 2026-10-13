@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { Activity, AlertCircle, Archive, BarChart3, Camera, Check, ChevronLeft, ChevronRight, Copy, Database, Download, HardDrive, LogOut, Plus, RefreshCw, Server, Settings, ShieldCheck, Video, X } from 'lucide-react'
-import { api, bytes, datetime, type Device, type FilePage, type Statistics, type Status, type Storage } from './api'
+import { Activity, AlertCircle, Archive, BarChart3, Camera, Check, ChevronLeft, ChevronRight, Copy, Database, Download, HardDrive, Import, LogOut, Play, Plus, RefreshCw, Server, Settings, ShieldCheck, Video, X } from 'lucide-react'
+import { api, bytes, datetime, type Device, type FilePage, type Recording, type Statistics, type Status, type Storage } from './api'
+import ImportPanel from './ImportPanel'
+import VideoPlayer from './VideoPlayer'
 
-type View = 'overview' | 'files' | 'devices' | 'storage'
+type View = 'overview' | 'files' | 'devices' | 'storage' | 'import'
 type Filters = { year: string; month: string; day: string; device_id: string; channel: string; kind: string }
 const emptyFilters: Filters = { year: '', month: '', day: '', device_id: '', channel: '', kind: '' }
 const blankStorage: Storage = { protocol: 'local', address: '/data', username: '', domain: '', password: null, encrypt: false, nfs_version: 3, uid: 65534, gid: 65534 }
 const storageLabels: Record<Storage['protocol'], string> = { local: '本地磁盘', nfs: 'NFS', smb: 'SMB2 / SMB3' }
 const stateLabels: Record<string, string> = { cached: '本地缓存', pending: '等待落盘', uploading: '正在落盘', stored: '已存储', queued: '等待归档', running: '正在归档', failed: '失败', done: '完成' }
 
-function Dialog({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
+function Dialog({ title, children, close, className }: { title: string; children: ReactNode; close: () => void; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => { ref.current?.showModal() }, [])
-  return <dialog ref={ref} onCancel={close} onClose={close}>
+  return <dialog ref={ref} className={className} aria-label={title} onCancel={close} onClose={close}>
     <div className="dialog-title"><h2>{title}</h2><button className="icon-button" aria-label="关闭" onClick={close}><X size={20}/></button></div>{children}
   </dialog>
 }
@@ -40,6 +42,7 @@ export default function App() {
   const [deviceDialog, setDeviceDialog] = useState<Device | 'new' | null>(null)
   const [credentials, setCredentials] = useState<Device | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
+  const [playing, setPlaying] = useState<Recording | null>(null)
 
   function notify(text: string, error = false) { setToast({ text, error }) }
   function failure(error: unknown) {
@@ -91,7 +94,7 @@ export default function App() {
       {toast && <p className="inline-error" role="alert">{toast.text}</p>}
     </form></div>
 
-  const titles: Record<View, [string, string]> = { overview: ['存储总览', '录像流转与空间使用，一目了然。'], files: ['录像文件', '按设备、日期和录像类型查看当前保留的数据。'], devices: ['摄像机管理', '每台设备独立接入，保留策略灵活设置。'], storage: ['真实存储', '完成的录像整文件转存到这里。'] }
+  const titles: Record<View, [string, string]> = { overview: ['存储总览', '录像流转与空间使用，一目了然。'], files: ['录像文件', '按设备、日期和录像类型查看当前保留的数据。'], devices: ['摄像机管理', '每台设备独立接入，保留策略灵活设置。'], storage: ['真实存储', '完成的录像整文件转存到这里。'], import: ['旧录像导入', '选择已有录像文件夹，沿用摄像机的保留与归档规则。'] }
   const ordinary = stats?.groups.filter(g => g.kind === 'original').reduce((total, g) => total + g.bytes, 0) ?? 0
   const archived = stats?.groups.filter(g => g.kind === 'archive').reduce((total, g) => total + g.bytes, 0) ?? 0
   const days = [...new Set(stats?.groups.map(g => g.day) ?? [])].slice(-30)
@@ -101,7 +104,7 @@ export default function App() {
 
   return <div className="app-layout"><aside className="sidebar"><div className="brand"><Camera size={25}/><span>CamMon<span className="brand-dot">.</span></span></div><div className="workspace-label">录像管理中心</div>
     <nav>{([
-      ['overview', BarChart3, '存储总览'], ['files', Video, '录像文件'], ['devices', Camera, '摄像机管理'], ['storage', Settings, '真实存储'],
+      ['overview', BarChart3, '存储总览'], ['files', Video, '录像文件'], ['devices', Camera, '摄像机管理'], ['storage', Settings, '真实存储'], ['import', Import, '旧录像导入'],
     ] as const).map(([key, Icon, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}><Icon size={19}/><span>{label}</span></button>)}</nav>
     <div className="sidebar-footer"><span className="small-status"><span className="dot"/>北京时间 · UTC+8</span><div className="user"><span className="avatar">{user[0].toUpperCase()}</span><div><strong>{user}</strong><small>管理员</small></div><button className="icon-button" aria-label="退出登录" onClick={async () => { try { await api('/auth/logout', 'POST'); setUser(null) } catch (e) { failure(e) } }}><LogOut size={17}/></button></div></div>
   </aside><main><header className="topbar"><span>工作空间 <span className="breadcrumb">/</span> {titles[view][0]}</span><span className="top-status"><ShieldCheck size={15}/> 独立设备账户</span></header>
@@ -137,7 +140,7 @@ export default function App() {
       </>}
 
       {view === 'files' && <section className="panel"><div className="panel-heading"><h2>文件明细 <span className="count">{files?.count ?? 0}</span></h2><span className="muted">{fileLoading ? '正在查询…' : '每段录像只计入一次'}</span></div>
-        {files?.items.length ? <><div className="table-scroll"><table className="file-table"><thead><tr><th>录像文件</th><th>摄像机 / 编号</th><th>类型</th><th>大小</th><th>存储状态</th><th/></tr></thead><tbody>{files.items.map(file => <tr key={file.id}><td><div className="filename"><span className={`file-icon ${file.kind === 'archive' ? 'purple' : ''}`}>{file.kind === 'archive' ? <Archive size={19}/> : <Video size={19}/>}</span><div><strong title={file.path}>{file.path.split('/').at(-1)}</strong><small>{datetime(file.start)}{file.kind === 'original' ? ` → ${datetime(file.end)}` : ' · 按日归档'}</small>{file.error && <small className="inline-error">{file.error}</small>}</div></div></td><td>{file.device_name}<small className="cell-note">编号 {file.channel}</small></td><td><span className={`badge ${file.kind === 'archive' ? 'purple' : ''}`}>{file.kind === 'archive' ? '60× 归档' : '普通录像'}</span></td><td className="numeric">{bytes(file.size)}</td><td><span className={`badge ${file.state === 'stored' ? 'green' : ''}`}>{stateLabels[file.state] ?? file.state}</span></td><td><a className="icon-button" href={`/api/files/${file.id}/download`} aria-label={`下载 ${file.path}`}><Download size={18}/></a></td></tr>)}</tbody></table></div><div className="pagination"><span>第 {offset + 1}–{Math.min(offset + 50, files.count)} 个，共 {files.count} 个</span><div><button className="icon-button" disabled={offset === 0} onClick={() => setOffset(o => Math.max(0, o - 50))} aria-label="上一页"><ChevronLeft size={18}/></button><button className="icon-button" disabled={offset + 50 >= files.count} onClick={() => setOffset(o => o + 50)} aria-label="下一页"><ChevronRight size={18}/></button></div></div></> : <Empty icon={<Video size={32}/>} title={fileLoading ? '正在加载文件…' : '没有符合条件的录像'} text="调整筛选条件，或等待摄像机写入录像。"/>}
+        {files?.items.length ? <><div className="table-scroll"><table className="file-table"><thead><tr><th>录像文件</th><th>摄像机 / 编号</th><th>类型</th><th>大小</th><th>存储状态</th><th/></tr></thead><tbody>{files.items.map(file => <tr key={file.id}><td><div className="filename"><span className={`file-icon ${file.kind === 'archive' ? 'purple' : ''}`}>{file.kind === 'archive' ? <Archive size={19}/> : <Video size={19}/>}</span><div><strong title={file.path}>{file.path.split('/').at(-1)}</strong><small>{datetime(file.start)}{file.kind === 'original' ? ` → ${datetime(file.end)}` : ' · 按日归档'}</small>{file.error && <small className="inline-error">{file.error}</small>}</div></div></td><td>{file.device_name}<small className="cell-note">编号 {file.channel}</small></td><td><span className={`badge ${file.kind === 'archive' ? 'purple' : ''}`}>{file.kind === 'archive' ? '60× 归档' : '普通录像'}</span></td><td className="numeric">{bytes(file.size)}</td><td><span className={`badge ${file.state === 'stored' ? 'green' : ''}`}>{stateLabels[file.state] ?? file.state}</span></td><td><div className="file-actions"><button className="icon-button" aria-label={`播放 ${file.path}`} title={file.size ? "在线播放" : "录像文件为空"} disabled={!file.size} onClick={() => setPlaying(file)}><Play size={18}/></button><a className="icon-button" href={`/api/files/${file.id}/download`} aria-label={`下载 ${file.path}`}><Download size={18}/></a></div></td></tr>)}</tbody></table></div><div className="pagination"><span>第 {offset + 1}–{Math.min(offset + 50, files.count)} 个，共 {files.count} 个</span><div><button className="icon-button" disabled={offset === 0} onClick={() => setOffset(o => Math.max(0, o - 50))} aria-label="上一页"><ChevronLeft size={18}/></button><button className="icon-button" disabled={offset + 50 >= files.count} onClick={() => setOffset(o => o + 50)} aria-label="下一页"><ChevronRight size={18}/></button></div></div></> : <Empty icon={<Video size={32}/>} title={fileLoading ? '正在加载文件…' : '没有符合条件的录像'} text="调整筛选条件，或等待摄像机写入录像。"/>}
       </section>}
 
       {view === 'devices' && <>{devices.length ? <div className="device-grid">{devices.map(device => <section className="panel device-card" key={device.id}><div className="device-card-top"><span className="camera-tile"><Camera size={24}/></span><span className={`badge ${device.enabled ? 'green' : ''}`}>{device.enabled ? '已启用' : '已停用'}</span></div><h2>{device.name}</h2><p className="muted">独立共享 · 独立访问账户</p><div className="share-path"><code>{`\\\\${location.hostname}\\${device.share}`}</code><button className="icon-button" aria-label="复制共享路径" onClick={() => copy(`\\\\${location.hostname}\\${device.share}`).then(() => notify('共享路径已复制')).catch(failure)}><Copy size={15}/></button></div><div className="device-details"><span>原录像保留</span><strong>{device.retention_days} 天</strong><span>归档录像</span><strong>60× · 永久保存</strong><span>账户</span><code>{device.username}</code></div><div className="device-actions"><button className="secondary" onClick={() => setDeviceDialog(device)}>编辑设置</button><button className="text-button" onClick={async () => { try { await api(`/devices/${device.id}`, 'PATCH', { enabled: !device.enabled }); await reload(); notify(device.enabled ? '设备已停用，现有录像继续保留' : '设备已启用') } catch (e) { failure(e) } }}>{device.enabled ? '停用' : '启用'}</button></div></section>)}</div> : <section className="panel"><Empty icon={<Camera size={38}/>} title="添加你的第一台摄像机" text="系统会为它生成共享路径、独立账号和密码。"/><div className="empty-action"><button className="primary" onClick={() => setDeviceDialog('new')}><Plus size={16}/>添加摄像机</button></div></section>}
@@ -161,9 +164,11 @@ export default function App() {
         <p className="field-note">断线期间继续使用内存配置，恢复后自动同步。重启从 PostgreSQL 加载已保存的数据，未同步的变更和临时录像会丢失。</p>
       </section>}
 
+      {view === 'import' && <ImportPanel devices={devices} failure={failure} onImported={async report => { notify(`已导入 ${report.imported} 个录像，关联副本 ${report.copies} 个，已存在 ${report.duplicates} 个，跳过 ${report.skipped} 个，失败 ${report.failed} 个`); await reload() }} />}
       <footer className="page-footer"><span>CamMon · 录像存储网关</span><span>统计当前保留数据 · Asia/Shanghai</span></footer>
     </div></main>
     {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={19}/> : <Check size={19}/>}<span>{toast.text}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="关闭提示"><X size={16}/></button></div>}
+    {playing && <Dialog title="在线播放" className="player-dialog" close={() => setPlaying(null)}><VideoPlayer key={playing.id} file={playing}/></Dialog>}
     {deviceDialog && <Dialog title={deviceDialog === 'new' ? '添加摄像机' : '编辑摄像机'} close={() => setDeviceDialog(null)}><form onSubmit={async event => { event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); try { const body = { name: data.get('name'), retention_days: Number(data.get('retention_days')) }; if (deviceDialog === 'new') { const created = await api<Device>('/devices', 'POST', body); setCredentials(created) } else { await api(`/devices/${deviceDialog.id}`, 'PATCH', body); notify('摄像机设置已更新') }; setDeviceDialog(null); await reload() } catch (e) { failure(e) } finally { setBusy(false) } }}><label>设备名称<input name="name" required maxLength={100} autoFocus defaultValue={deviceDialog === 'new' ? '' : deviceDialog.name} placeholder="例如：客厅摄像机"/></label><label>原录像保留天数<input name="retention_days" type="number" min="1" max="36500" required defaultValue={deviceDialog === 'new' ? 30 : deviceDialog.retention_days}/></label><p className="field-note">按北京时间自然日计算，包含当天。过期录像生成每个相机编号独立的 60 倍速归档。</p><div className="form-actions">{deviceDialog !== 'new' && <button type="button" className="text-button" disabled={busy} onClick={async () => { setBusy(true); try { const result = await api<{ password: string }>(`/devices/${deviceDialog.id}/reset-password`, 'POST'); setCredentials({ ...deviceDialog, password: result.password }); setDeviceDialog(null) } catch (e) { failure(e) } finally { setBusy(false) } }}>重置接入密码</button>}<button className="primary" disabled={busy}>{busy ? '正在保存…' : '保存'}</button></div></form></Dialog>}
     {credentials && <Dialog title="摄像机接入信息" close={() => setCredentials(null)}><p className="muted">请保存密码，并将下列信息填写到摄像机的 NAS / 网络存储设置中。</p><div className="credential-list">{[
       ['共享路径', `\\\\${location.hostname}\\${credentials.share}`], ['用户名', credentials.username], ['密码', credentials.password ?? ''],

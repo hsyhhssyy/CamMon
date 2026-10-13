@@ -61,12 +61,12 @@
 ## 当前口径
 
 1. FastAPI、PostgreSQL 元数据 / SQLite 内存索引、React、TypeScript；管理员登录，设备配置、保留日期、凭据重置、后端读写测试。离线同步见 [REQ-004](REQ-004-metadata.md)。
-2. 年、月、日期、设备、X、普通/归档类型同时筛选；分页、当前保留大小/数量，支持 HTTP 字节范围下载。
+2. 年、月、日期、设备、X、普通/归档类型同时筛选；分页、当前保留大小/数量，支持 HTTP 字节范围下载和在线播放，播放支持暂停、拖动、全屏及 0.5×–4× 速度。
 3. 本地缓存和远程原件只算一次；临时副本排除；普通按起始日期，归档按归档日期。
 4. Docker host 网络，管理默认 18080；Samba 状态与虚拟目录用 tmpfs，元数据及凭据保存 PostgreSQL，录像缓存允许重启丢失；启动检查具体端口冲突。
-5. 第一版文件列表和下载；已有数据禁止直接更换后端地址，不自动迁移。
+5. 本地磁盘支持浏览文件夹、预览和导入旧录像，按文件名识别 X 与北京时间；直接索引原位置，不复制或占用缓存。相同录像通过大小和 SHA256 核对后关联副本，归档只统计和处理一次，元数据确认后清理；内容不同或无法核对时保留源文件。已有数据禁止直接更换后端地址，不自动迁移。
 6. GitHub Actions 在版本标签推送或手动触发时发布 GHCR 镜像，复用全部检查和编译缓存；amd64 / arm64 原生测试与构建，发布 production 多架构镜像。普通分支与 PR 只执行检查。
-7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.6，host 网络直接监听 TCP 139/445/18080，管理端口可配置。UDP 137/138 默认自动沿用 NAS 已有发现，支持 CAMMON_NETBIOS_MODE=external 显式共存。CI 验证 Public 及匿名镜像访问。本地磁盘为新增默认存储选项，容器路径 `/data` 对应 NAS 的 `/volume1/WebCam`，挂载可通过 CAMMON_STORAGE_PATH 修改。
+7. NAS 可独立使用 compose.ghcr.yaml 和 .env.ghcr.example 拉取 GHCR 公开镜像，无本地 build，也无需登录；默认固定 ghcr.io/hsyhhssyy/cammon:0.1.7，host 网络直接监听 TCP 139/445/18080，管理端口可配置。UDP 137/138 默认自动沿用 NAS 已有发现，支持 CAMMON_NETBIOS_MODE=external 显式共存。CI 验证 Public 及匿名镜像访问。本地磁盘为新增默认存储选项，容器路径 `/data` 对应 NAS 的 `/volume1/WebCam`，挂载可通过 CAMMON_STORAGE_PATH 修改。
 
 ## 当前状态视图
 
@@ -79,7 +79,7 @@
 ## 功能拆解 / 实施拆解
 
 1. cammon/api.py、security.py：REST、Cookie 会话、凭据加密和范围下载。
-2. frontend/src：总览、设备、真实存储、筛选与任务告警；本地提供全部运行资源。
+2. frontend/src：总览、设备、真实存储、筛选、任务告警、在线播放和旧录像导入；本地提供全部运行资源。
 3. Dockerfile、compose.yaml、compose.ghcr.yaml、scripts、README.md、CI：构建、预检与源码 / GHCR 镜像部署。
 
 ## 验收标准
@@ -91,6 +91,13 @@
 5. 发布流程须先通过应用和协议检查，正确生成稳定、预发布或手动标签；两种架构成功后才发布镜像标签，使用 GITHUB_TOKEN 和小写仓库地址。
 
 ## 测试记录
+
+### 2026-10-13 0.1.7 发布前验收
+
+- 场景：在线播放、旧录像预览 / 导入 / 副本关联、归档后虚拟文件及部署版本更新。
+- 实际结果：115 项非集成测试、19 项 PostgreSQL 测试、2 项浏览器流程、前端构建、Ruff 与锁文件校验通过；本机缺少原生 Samba 的 1 项 PostgreSQL 集成测试由云端容器验收补齐。
+- 证据：[API 验收](../../../../tests/test_api.py)、[导入验收](../../../../tests/test_importer.py)、[播放流程](../../../../frontend/e2e/playback.spec.ts)、[管理与导入流程](../../../../frontend/e2e/manage.spec.ts)。
+- 发布状态：准备提交并发布 v0.1.7；云端协议及镜像发布结果另行记录。
 
 ### 2026-10-08 本机自动化验收
 

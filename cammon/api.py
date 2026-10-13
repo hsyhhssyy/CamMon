@@ -13,10 +13,12 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from starlette.background import BackgroundTask
 
 from cammon.archive import Worker
 from cammon.config import Settings
 from cammon.core import Gateway
+from cammon.importer import RecordingImporter
 from cammon.rpc import Server
 from cammon.samba import SambaManager
 from cammon.security import password_matches
@@ -70,6 +72,12 @@ class StorageConfig(BaseModel):
         if any(c in value for c in ("\n", "\r", "\x00")):
             raise ValueError("Invalid storage address")
         return value.strip()
+
+
+class ImportRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=100)
+    folder: str = Field(min_length=1, max_length=4096)
+    recursive: bool = True
 
 
 def filters(
@@ -258,17 +266,30 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
               offset: int = Query(default=0, ge=0), g: Gateway = auth):
         return g.query_files(query, limit, offset)
 
+    @app.get("/api/import/folders")
+    def import_folders(path: str | None = None, g: Gateway = auth):
+        return RecordingImporter(g).folders(path)
+
+    @app.post("/api/import/preview")
+    def preview_import(data: ImportRequest, g: Gateway = auth):
+        return RecordingImporter(g).scan(data.device_id, data.folder, data.recursive)
+
+    @app.post("/api/import")
+    def import_recordings(data: ImportRequest, g: Gateway = auth):
+        return RecordingImporter(g).scan(data.device_id, data.folder, data.recursive, commit=True)
+
     @app.get("/api/stats")
     def stats(query: dict = Depends(filters), g: Gateway = auth):
         return g.statistics(query)
 
-    @app.api_route("/api/files/{recording_id}/download", methods=["GET", "HEAD"])
-    def download(recording_id: int, request: Request, g: Gateway = auth):
+    def recording_response(recording_id: int, request: Request, g: Gateway, disposition: str):
         row = g.recording(recording_id)
+        if row["state"] == "virtual":
+            raise HTTPException(410, "原录像已归档，仅保留文件信息；请播放或下载对应的归档录像")
         start, end, partial = parse_range(request.headers.get("range"), row["size"])
         length = end - start + 1 if row["size"] else 0
         headers = {"Accept-Ranges": "bytes", "Content-Length": str(length),
-                   "Content-Disposition": "attachment; filename*=UTF-8''" + quote(Path(row["path"]).name)}
+                   "Content-Disposition": disposition + "; filename*=UTF-8''" + quote(Path(row["path"]).name)}
         if partial:
             headers["Content-Range"] = f"bytes {start}-{end}/{row['size']}"
         if request.method == "HEAD":
@@ -288,7 +309,16 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             finally:
                 g.close(token)
 
-        return StreamingResponse(stream(), status_code=206 if partial else 200, headers=headers, media_type="video/mp4")
+        return StreamingResponse(stream(), status_code=206 if partial else 200, headers=headers,
+                                 media_type="video/mp4", background=BackgroundTask(g.close, token))
+
+    @app.api_route("/api/files/{recording_id}/download", methods=["GET", "HEAD"])
+    def download(recording_id: int, request: Request, g: Gateway = auth):
+        return recording_response(recording_id, request, g, "attachment")
+
+    @app.api_route("/api/files/{recording_id}/stream", methods=["GET", "HEAD"])
+    def play_recording(recording_id: int, request: Request, g: Gateway = auth):
+        return recording_response(recording_id, request, g, "inline")
 
     @app.post("/api/jobs/{job_id}/retry")
     def retry_job(job_id: str, g: Gateway = auth):

@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from cammon.importer import COPY_PREFIX, RecordingImporter
 from cammon.naming import TZ, day_slices
 from cammon.storage import CHUNK, file_hash
 
@@ -121,6 +122,7 @@ class Archiver:
                     metadata = self.probe(source_path)
                     if abs(metadata["duration"] - (row["end"] - row["start"])) > 2:
                         raise ValueError(f"录像时长与文件名时间区间不符: {row['path']}")
+                    g.db.execute("UPDATE recordings SET duration=? WHERE id=?", (metadata["duration"], row["id"]))
                     length = min(source["length"], metadata["duration"] - source["offset"])
                     if length <= 0:
                         raise ValueError("录像缺少此日期对应的内容")
@@ -218,7 +220,7 @@ class Archiver:
                 if g.metadata.configured:
                     # A reboot may lose memory. Historical originals stay until
                     # the permanent archive and every covered day are saved in PG.
-                    confirmed = True
+                    confirmed = not g.db.metadata_pending("recordings", [row["id"]])
                     for item in coverage:
                         job = g.db.one("SELECT * FROM archive_jobs WHERE id=?", (item["job_id"],))
                         if (not job or job["status"] != "done" or job["archive_id"] is None
@@ -237,13 +239,74 @@ class Archiver:
                 except FileNotFoundError:
                     pass
                 with g.lock:
-                    device = g.device(row["device_id"], enabled=False)
-                    g._projection(device, row["path"]).unlink(missing_ok=True)
-                    g.db.execute("UPDATE recordings SET state='deleted',error=NULL WHERE id=?", (row["id"],))
+                    # Cameras must keep seeing the original path and attributes,
+                    # or they can upload the same historical recording again.
+                    g.db.execute("UPDATE recordings SET state='virtual',duration=coalesce(duration,end-start),"
+                                 "error=NULL,retry_at=0 WHERE id=?", (row["id"],))
             except Exception as exc:
                 g.db.execute("UPDATE recordings SET state='stored',error=?,retry_at=? WHERE id=?",
                              (str(exc), time.time() + 30, row["id"]))
                 continue
+        self.collect_import_copies()
+
+    def collect_import_copies(self):
+        g = self.gateway
+        copies = g.db.all("SELECT key,value FROM settings WHERE key LIKE ?", (COPY_PREFIX + "%",))
+        if not copies:
+            return
+        importer = RecordingImporter(g)
+        backend = importer.backend
+        backend.stopping = g.stopping
+        for saved in copies:
+            if g.stopping.is_set():
+                return
+            copy = json.loads(saved["value"])
+            if copy["retry_at"] > time.time():
+                continue
+            with g.lock:
+                original = g.db.one("SELECT * FROM recordings WHERE id=? AND state='virtual'",
+                                    (copy["recording_id"],))
+                if not original:
+                    continue
+                days = day_slices(original["start"], original["end"])
+                if not days:
+                    continue
+                confirmed = True
+                for day, _, _ in days:
+                    coverage = g.db.one(
+                        "SELECT c.job_id,j.archive_id FROM coverage c JOIN archive_jobs j ON j.id=c.job_id "
+                        "JOIN recordings a ON a.id=j.archive_id WHERE c.recording_id=? AND c.day=? "
+                        "AND j.status='done' AND a.kind='archive' AND a.state='stored'", (original["id"], day),
+                    )
+                    if not coverage or (g.metadata.configured and (
+                        g.db.metadata_pending("coverage", [original["id"], day])
+                        or g.db.metadata_pending("archive_jobs", [coverage["job_id"]])
+                        or g.db.metadata_pending("recordings", [coverage["archive_id"]])
+                    )):
+                        confirmed = False
+                        break
+                if not confirmed or (g.metadata.configured and (
+                    g.db.metadata_pending("settings", [saved["key"]])
+                    or g.db.metadata_pending("recordings", [original["id"]])
+                )):
+                    continue
+            try:
+                source = importer.root / copy["remote_path"]
+                importer.folder(str(source.parent))
+                try:
+                    if source.is_symlink() or not source.is_file():
+                        if source.exists() or source.is_symlink():
+                            raise ValueError("副本已变为符号链接或非普通文件，已保留")
+                        raise FileNotFoundError(source)
+                    if source.stat().st_size != copy["size"] or file_hash(source, g.stopping) != copy["sha256"]:
+                        raise ValueError("副本内容已改变，已保留文件，请手工检查")
+                    backend.remove(copy["remote_path"])
+                except FileNotFoundError:
+                    pass
+                g.db.execute("DELETE FROM settings WHERE key=?", (saved["key"],))
+            except (OSError, ValueError) as exc:
+                copy.update(error=str(exc), retry_at=time.time() + 30)
+                g.set_setting(saved["key"], copy)
 
 
 class Worker:

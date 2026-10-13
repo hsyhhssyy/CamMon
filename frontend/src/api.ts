@@ -6,6 +6,8 @@ export type MetadataStatus = { configured: boolean; connected: boolean; schema: 
 export type Status = { storage_configured: boolean; cache_bytes: number; cache_available_bytes: number; cache_limit_bytes: number; cache_error: string | null; pending_files: number; writing_handles: number; protocol_error: string | null; worker_error: string | null; alerts: { id: number; path: string; error: string }[]; jobs: Job[]; metadata: MetadataStatus; discovery: { mode: 'pending' | 'internal' | 'external' | 'disabled'; message: string } }
 export type Statistics = { count: number; bytes: number; groups: { day: string; kind: string; count: number; bytes: number }[] }
 export type FilePage = { items: Recording[]; count: number; bytes: number }
+export type ImportFolders = { root: string; path: string; parent: string | null; folders: { name: string; path: string }[] }
+export type ImportReport = { folder: string; device_id: string; recursive: boolean; total: number; importable: number; imported: number; duplicates: number; copies: number; skipped: number; failed: number; bytes: number; expired: number; items: { path: string; status: 'ready' | 'imported' | 'duplicate' | 'skipped' | 'failed'; reason: string | null; day?: string; channel?: string; size?: number; expired?: boolean }[] }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch('/api' + path, {
