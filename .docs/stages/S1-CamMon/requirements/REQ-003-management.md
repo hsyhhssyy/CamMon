@@ -72,7 +72,7 @@
 
 - 当前状态：`in-progress`。
 - 当前目标：管理、统计下载和 NAS Docker 部署。
-- 当前已知进展：cammon:0.1.6 及 latest 已公开发布，双架构与匿名访问已验证，各架构通过 108 项完整容器测试，新增本地磁盘默认配置和 NAS 目录绑定挂载。目标 NAS 先前 0.1.5 的页面、健康、SMB1 协商及发现检查通过；本次未更新 NAS。需要账号的管理操作与录像流转现场验收待完成。
+- 当前已知进展：cammon:0.1.7 及 latest 已公开发布，双架构与匿名访问已验证，各架构通过 157 项完整容器测试；新增在线播放、旧录像导入、副本关联清理和虚拟原片，本地磁盘及 NAS 目录绑定挂载继续沿用。目标 NAS 先前 0.1.5 的页面、健康、SMB1 协商及发现检查通过；本次未更新 NAS。需要账号的管理操作与录像流转现场验收待完成。
 - 最新部署观察：2026-10-12 NAS 更新后 /healthz 返回 ok=true、protocol_error=null、discovery.mode=external；未登录 /api/auth/me 返回 HTTP 401，认证要求仍生效。
 - 下一步动作：现场部署验收或负载观察；验收边界见待确认问题。
 
@@ -97,7 +97,7 @@
 - 场景：在线播放、旧录像预览 / 导入 / 副本关联、归档后虚拟文件及部署版本更新。
 - 实际结果：115 项非集成测试、19 项 PostgreSQL 测试、2 项浏览器流程、前端构建、Ruff 与锁文件校验通过；本机缺少原生 Samba 的 1 项 PostgreSQL 集成测试由云端容器验收补齐。
 - 证据：[API 验收](../../../../tests/test_api.py)、[导入验收](../../../../tests/test_importer.py)、[播放流程](../../../../frontend/e2e/playback.spec.ts)、[管理与导入流程](../../../../frontend/e2e/manage.spec.ts)。
-- 发布状态：准备提交并发布 v0.1.7；云端协议及镜像发布结果另行记录。
+- 发布状态：[七个云端任务](https://github.com/hsyhhssyy/CamMon/actions/runs/38347769327)全部成功，两种架构各通过 157 项完整容器测试。[Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.7)已发布，0.1.7 / latest / 0.1 / SHA 的匿名清单与版本配置验证通过，源码提交 c9d4c0a，摘要 `sha256:e04253019377b1c34c84792e89f73d38d35910d0b4afd2ff4041b67713d4624c`。
 
 ### 2026-10-08 本机自动化验收
 

@@ -99,6 +99,12 @@ PostgreSQL 持久保存元数据。用户在 2026-10-09 明确：只要求运行
 
 ## 测试记录
 
+### 2026-10-13 0.1.7 导入与虚拟原片持久化
+
+- 场景：空运行目录重启恢复导入索引、关联副本和虚拟原片；归档清理及副本删除等待 PostgreSQL 确认。
+- 实际结果：本机 19 项 PostgreSQL 测试通过；[双架构发布验收](https://github.com/hsyhhssyy/CamMon/actions/runs/38347769327)各通过 157 项完整容器测试，补齐依赖原生 Samba 的认证重建测试。
+- 证据：[PostgreSQL 集成测试](../../../../tests/test_postgres_integration.py)、[归档清理测试](../../../../tests/test_archive.py)。
+
 ### 2026-10-09 内存模式验收
 
 - 场景：真实 PostgreSQL 断线服务、冷启动及状态丢弃，批次一致性、认证重建、归档删除确认。

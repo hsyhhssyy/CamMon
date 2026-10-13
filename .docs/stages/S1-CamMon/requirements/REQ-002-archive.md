@@ -93,7 +93,7 @@
 ### 2026-10-13 虚拟原片与导入副本清理
 
 - 场景：归档后文件属性、升级恢复、跨日覆盖、导入源和关联副本清理、原件损坏及元数据未确认。
-- 实际结果：包含在 115 项非集成和 19 项 PostgreSQL 测试中并通过；真实 SMB1 虚拟文件枚举、查询和禁止覆盖由发布容器测试补齐。
+- 实际结果：包含在 115 项非集成和 19 项 PostgreSQL 测试中并通过；[0.1.7 发布容器测试](https://github.com/hsyhhssyy/CamMon/actions/runs/38347769327)在 amd64 / arm64 各通过全部 157 项，补齐真实 SMB1 虚拟文件枚举、属性查询和禁止覆盖验收。
 - 证据：[归档验收](../../../../tests/test_archive.py)、[PostgreSQL 验收](../../../../tests/test_postgres_integration.py)、[SMB 验收](../../../../tests/test_smb_integration.py)。
 
 ### 2026-10-08 本机自动化验收
