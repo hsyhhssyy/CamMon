@@ -209,12 +209,12 @@
 - `标题`：浏览器测试共享存储导致播放首帧断言失败。
 - `发现时间`：2026-10-13。
 - `发现来源`：[v0.1.9 云端发布检查](https://github.com/hsyhhssyy/CamMon/actions/runs/38423142319)。
-- `当前状态`：`fixed`，本地两个 worker 和单 worker 回归通过，云端发布回归待核验。
+- `当前状态`：`fixed`，本地两个 worker 和单 worker 回归通过，v0.1.10 云端应用及完整发布回归通过。
 - `归属类型`：`related-to-requirement`。
 - `关联需求`：[S1-RQ-003](requirements/REQ-003-management.md)。
 - `现象 / 影响`：四项测试共用一个网关；CI 两个 worker 先完成管理测试，该测试更换并删除本地存储，随后播放测试无法读取已生成的首帧，naturalWidth 断言超时。v0.1.9 镜像上传被阻止。
 - `处理结果`：每项浏览器测试启动独立 uvicorn 进程，分配空闲端口和临时录像 / 存储目录，结束时停止进程并清理目录，消除顺序及并发状态串扰。
-- `回归情况`：4 项浏览器测试在两个 worker 并发及单 worker 顺序配置均通过；v0.1.10 云端回归待核验。
+- `回归情况`：4 项浏览器测试在两个 worker 并发及单 worker 顺序配置均通过；[v0.1.10 云端回归](https://github.com/hsyhhssyy/CamMon/actions/runs/38424283874)全部七个任务成功，4 项浏览器测试及双架构各 209 项完整容器测试通过，公开镜像与 Release 已验证。
 
 ## 更新日志
 

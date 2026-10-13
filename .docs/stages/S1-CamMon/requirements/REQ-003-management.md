@@ -74,7 +74,7 @@
 
 - 当前状态：`in-progress`。
 - 当前目标：管理、统计下载和 NAS Docker 部署。
-- 当前已知进展：cammon:0.1.8 及 latest 已公开发布，双架构与匿名访问已验证，各架构通过 200 项完整容器测试；新增小米录像支持和后台导入进度，既有播放、副本清理、虚拟原片和本地磁盘继续沿用。目标 NAS 先前 0.1.5 的页面、健康、SMB1 协商及发现检查通过；本次未更新 NAS。需要账号的管理操作与录像流转现场验收待完成。
+- 当前已知进展：cammon:0.1.10 及 latest 已公开发布，双架构与匿名访问已验证，各架构通过 209 项完整容器测试；新增持久首帧、完整信息卡片和分页按需导入预览，既有播放、副本清理、虚拟原片和本地磁盘继续沿用。目标 NAS 先前 0.1.5 的页面、健康、SMB1 协商及发现检查通过；本次未更新 NAS。需要账号的管理操作与录像流转现场验收待完成。
 - 最新部署观察：2026-10-12 NAS 更新后 /healthz 返回 ok=true、protocol_error=null、discovery.mode=external；未登录 /api/auth/me 返回 HTTP 401，认证要求仍生效。
 - 下一步动作：现场部署验收或负载观察；验收边界见待确认问题。
 
@@ -99,7 +99,7 @@
 - 场景：持久首帧和分页导入预览；修复 v0.1.9 暴露的浏览器测试共享状态干扰。
 - 实际结果：4 项浏览器流程在两个 worker 并发和单 worker 顺序配置均通过，前端生产构建、Ruff、锁文件与 Compose 校验通过。产品功能沿用已通过的 162 项非集成及 22 项本地 PostgreSQL 验收。
 - 证据：[独立服务器 fixture](../../../../frontend/e2e/fixtures.ts)、[浏览器种子服务](../../../../tests/ui_server.py)、[S1-BUG-011](../bugs.md)。
-- 发布状态：准备 v0.1.10；最终云端检查、GHCR 发布和匿名双架构核验待执行。
+- 发布状态：[七个云端任务](https://github.com/hsyhhssyy/CamMon/actions/runs/38424283874)全部成功，两种架构各通过 209 项完整容器测试；0.1.10 / latest / 0.1 / SHA 匿名清单和镜像配置已独立核对，源码提交 `211e130`，摘要 `sha256:5052fd3642ebf5cc439714b499cae0b972d5aa189d516f9f1469d51808d373f7`。[Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.10)正式发布。
 
 ### 2026-10-13 0.1.9 发布前验收
 
@@ -251,3 +251,5 @@ NAS 已有 NetBIOS 导致 SMB 服务整体无法启动见 [S1-BUG-009](../bugs.m
 - 2026-10-13：按用户要求发布 0.1.6，[七个云端任务](https://github.com/hsyhhssyy/CamMon/actions/runs/38282822017)全部成功，amd64 / arm64 各通过 108 项容器测试；公开 0.1.6 / latest 指向同一镜像摘要，匿名清单及版本配置验证完成，源码提交为 6a37f69。
 
 - 2026-10-13：0.1.8 后台导入提供总数、已处理数和当前文件，切换、刷新及关闭页面后可恢复查看；查询失败自动重试，同一运行中的任务重复提交返回原任务。任务记录仅保存在服务进程内，重启不自动续跑；`POST /api/import` 返回 HTTP 202，客户端通过任务查询获取结果。3 项浏览器流程通过，[发布](https://github.com/hsyhhssyy/CamMon/actions/runs/38408359091)与 [Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.8)验证完成。
+
+- 2026-10-13：v0.1.10 首帧预览及分页导入版本完成公开发布，[七个任务](https://github.com/hsyhhssyy/CamMon/actions/runs/38424283874)和双架构各 209 项容器测试通过；4 项浏览器流程通过，隔离修复见 [S1-BUG-011](../bugs.md)。匿名稳定 / SHA 清单与镜像配置验证通过，[Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.10)已发布；本次未更新目标 NAS。

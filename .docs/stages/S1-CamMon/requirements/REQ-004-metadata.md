@@ -159,3 +159,5 @@ PostgreSQL 持久保存元数据。用户在 2026-10-09 明确：只要求运行
 - 2026-10-13：目标 NAS PostgreSQL 初始化和提交确认通过；无需真实存储。按用户澄清只验证数据库，不继续录像或后端联调。
 
 - 2026-10-13：0.1.8 新增摄像机接入及历史导入两条小米录像流程的真实 PostgreSQL 重启测试，验证实际开始 / 结束时间、时长和目录恢复，以及源视频可读、临时缓存为空；本地及云端应用通过 21 项 PostgreSQL 测试，两种架构[完整容器测试](https://github.com/hsyhhssyy/CamMon/actions/runs/38408359091)各通过 200 项。后台导入任务进度仍仅保存在进程内，不持久化或自动续跑。
+
+- 2026-10-13：0.1.10 在启动时自动为旧 PostgreSQL recordings 表补充可空 thumbnail_path / thumbnail_error 字段，持久保存首帧关联与失败原因。旧表升级及小米录像缩略图重启恢复已通过真实数据库测试；本地 / 云端应用 22 项 PostgreSQL 测试通过，含原生认证重建的[完整容器测试](https://github.com/hsyhhssyy/CamMon/actions/runs/38424283874)在两种架构各通过 209 项。
