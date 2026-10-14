@@ -96,6 +96,8 @@ git push origin v0.1.13
 
 2026-10-13 的[0.1.10 发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38424283874)全部七个任务成功，amd64 / arm64 各通过 209 项完整容器测试；162 项非集成、22 项 PostgreSQL、4 项浏览器测试及前端生产构建通过。0.1.10 / latest / 0.1 / SHA 标签的匿名双架构清单、版本及源码配置已独立验证，指向提交 `211e130`，镜像摘要为 `sha256:5052fd3642ebf5cc439714b499cae0b972d5aa189d516f9f1469d51808d373f7`；[GitHub Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.10)已正式发布。默认部署版本为 0.1.10，新增录像和归档持久首帧、完整信息卡片及分页按需导入预览；v0.1.9 因浏览器测试共享存储干扰未上传镜像，修复后回归通过。
 
+2026-10-15 的[0.1.12 发布运行](https://github.com/hsyhhssyy/CamMon/actions/runs/38599070218)全部七个任务成功，amd64 / arm64 各通过 225 项完整容器测试；177 项非集成、23 项 PostgreSQL、12 项浏览器测试及前端生产构建通过。0.1.12 / latest / 0.1 / SHA 标签的匿名双架构清单、版本及源码配置已独立验证，指向提交 `ff7bfbd`，镜像摘要为 `sha256:56fa6be8935c20ce98cdd070eb606f0133986d577dee22214c72a974fa3a9263`；[GitHub Release](https://github.com/hsyhhssyy/CamMon/releases/tag/v0.1.12)已正式发布。默认部署版本为 0.1.12，修复文件夹浏览时反复扫描全部录像的卡顿，将目录归属和路径查询合并到浏览对话框，并增加加载、超时和失败重试。
+
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
 NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.12`，使用原 Compose 拉取启动：
