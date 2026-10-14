@@ -158,7 +158,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             if owns_gateway:
                 g.shutdown()
 
-    app = FastAPI(title="CamMon", version="0.1.11", lifespan=lifespan)
+    app = FastAPI(title="CamMon", version="0.1.12", lifespan=lifespan)
 
     @app.middleware("http")
     async def browser_protection(request: Request, call_next):

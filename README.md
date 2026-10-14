@@ -14,14 +14,14 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 ### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.11`，支持 `linux/amd64` 和 `linux/arm64`。0.1.11 新增 H.265/HEVC 浏览器端兼容播放、文件归属查询和导入目录独占绑定；0.1.10 新增录像及归档首帧缩略图、完整信息卡片和每页 25 个文件的按需导入预览；0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.12`，支持 `linux/amd64` 和 `linux/arm64`。0.1.12 修复旧录像导入的文件夹浏览卡顿，将目录归属展示和路径查询合并进浏览对话框，并增加加载、超时及失败重试；0.1.11 新增 H.265/HEVC 浏览器端兼容播放、文件归属查询和导入目录独占绑定；0.1.10 新增录像及归档首帧缩略图、完整信息卡片和每页 25 个文件的按需导入预览；0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
 test -f .env || cp .env.ghcr.example .env
 chmod 600 .env
 # 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
 # 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.11 \
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.12 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -47,7 +47,7 @@ NAS 的 NetBIOS UDP 端口无法释放时，使用默认 `CAMMON_NETBIOS_MODE=au
 
 共存时使用 NAS 现有的发现名称或直接填写 NAS IP，不会新增独立的 CAMMON 广播名称，也不修改 NAS 的发现服务。NAS 是否广播 SMB 服务器名称、摄像机能否枚举该名称，需要实机确认；直接通过 IP 和生成的共享名接入不依赖 UDP 发现。TCP 139/445 仍须独占。
 
-从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.11` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
+从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.12` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
 
 更新镜像时执行同一组 `pull` 和 `up -d` 命令；查看状态用 `docker compose -f compose.ghcr.yaml ps`，停止服务用 `docker compose -f compose.ghcr.yaml down`。更新重建容器会丢弃临时录像及未同步的内存变更，符合临时缓存约定。
 
@@ -76,11 +76,11 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.12
-git push origin v0.1.12
+git tag v0.1.13
+git push origin v0.1.13
 ```
 
-镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.12` 发布 `0.1.12`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.12-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.13` 发布 `0.1.13`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.13-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
@@ -98,7 +98,7 @@ git push origin v0.1.12
 
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.11`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.12`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py
@@ -157,7 +157,7 @@ PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archi
 
 使用本地磁盘存储时，可将历史录像放到 NAS 挂载目录中的独立文件夹，例如 `/volume1/WebCam/旧录像`（容器内为 `/data/旧录像`），然后在管理页“旧录像导入”中浏览或填写容器内路径，选择归属摄像机，预览后点击“开始导入”。默认包含所有子文件夹，也可取消递归扫描。已停用的摄像机同样可以接收历史数据。
 
-“旧录像导入”页面的“文件归属查询”可填写 `/data` 下任意视频、文件或文件夹的容器内绝对路径，查看摄像机名称、是否已登记录像或副本，以及路径是否仍在磁盘上。查询涵盖摄像机写入的 `originals/设备ID/`、`archives/设备ID/`、旧录像导入和关联副本；文件夹浏览器也显示目录归属。未入库的文件若位于已绑定目录内，会显示按目录归属，并注明尚未登记为录像。归档清理后仍可查询保存的归属。查询接口为需要登录的 `GET /api/storage/ownership?path=/data/旧录像/视频.mp4`，返回 `status`（`owned` 已归属、`unassigned` 未归属、`container` 公共父目录、`conflict` 历史归属冲突）、`owners`（摄像机 ID 和名称）、`kind`、`exists` 及关联录像信息。
+“旧录像导入”页面点击“浏览文件夹”后立即打开对话框，显示加载进度、当前目录和每个子目录的摄像机归属；加载失败或超时会在对话框内显示原因，可重试或返回存储根目录。归属信息按一次请求共享的路径索引查询，避免每个子目录都扫描全部录像。对话框内的“文件归属查询”默认显示当前目录，也可填写 `/data` 下任意视频、文件或文件夹的容器内绝对路径，查看摄像机名称、是否已登记录像或副本，以及路径是否仍在磁盘上。查询涵盖摄像机写入的 `originals/设备ID/`、`archives/设备ID/`、旧录像导入和关联副本。未入库的文件若位于已绑定目录内，会显示按目录归属，并注明尚未登记为录像。归档清理后仍可查询保存的归属。查询接口为需要登录的 `GET /api/storage/ownership?path=/data/旧录像/视频.mp4`，返回 `status`（`owned` 已归属、`unassigned` 未归属、`container` 公共父目录、`conflict` 历史归属冲突）、`owners`（摄像机 ID 和名称）、`kind`、`exists` 及关联录像信息。
 
 一个导入文件夹及其全部子目录只能归属一台摄像机。预览只检查归属，点击“开始导入”时立即保存目录绑定，即使目录为空、文件处理失败或取消递归扫描也保留绑定；视频归档或副本清理后绑定继续保留，并随元数据同步到 PostgreSQL、在重启后恢复。另一个摄像机导入相同目录、它的子目录或包含它的父目录时，预览和提交均返回 HTTP 409，不会部分导入。已有版本保存的录像和副本关联也参与检查；若历史数据已经把同一目录关联给多个摄像机，查询显示冲突并阻止继续导入，保留现有数据。`/data` 根目录是公共容器，导入时必须选择独立子目录；不同摄像机可以分别使用互不包含的同级目录。
 

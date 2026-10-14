@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import PurePosixPath
 from threading import Barrier
 
 import pytest
@@ -164,3 +165,49 @@ def test_storage_address_cannot_change_with_only_an_empty_folder_binding(gateway
     with pytest.raises(ValueError, match="已有目录归属"):
         gateway.configure_storage({"protocol": "local", "address": str(tmp_path / "another-disk")})
     assert gateway.backend.root == folder.parent
+
+
+def test_folder_browse_does_not_rescan_all_recordings_for_each_child(gateway, device, monkeypatch):
+    root = gateway.backend.root
+    for index in range(40):
+        (root / f"history-{index:02}").mkdir()
+    with gateway.lock:
+        gateway.db.connection.executemany(
+            "INSERT INTO recordings(device_id,path,channel,start,end,day,state,created_at,last_write,remote_path) "
+            "VALUES (?,?,'00',1,2,'2025-10-08','stored',1,1,?)",
+            [(device["id"], f"imports/{index}/video.mp4", f"history-{index % 40:02}/nested/{index}/video.mp4")
+             for index in range(1000)],
+        )
+    comparisons = 0
+    original = PurePosixPath.is_relative_to
+
+    def counted(path, other):
+        nonlocal comparisons
+        comparisons += 1
+        return original(path, other)
+
+    monkeypatch.setattr(PurePosixPath, "is_relative_to", counted)
+    listing = RecordingImporter(gateway).folders()
+    assert len(listing["folders"]) == 40
+    assert listing["ownership"]["status"] == "container"
+    assert all(child["ownership"]["owners"][0]["device_id"] == device["id"]
+               for child in listing["folders"])
+    # Bound path comparisons instead of wall time so slow CI hosts can still
+    # detect the old folders x recordings scan (over 80,000 comparisons).
+    assert comparisons < 2000
+
+
+def test_browse_index_preserves_path_boundaries_and_removed_subtrees(gateway, device):
+    root = gateway.backend.root
+    folder = root / "history"
+    sibling = root / "history-other"
+    folder.mkdir()
+    sibling.mkdir()
+    RecordingImporter(gateway).scan(device["id"], str(folder), commit=True)
+    folder.rmdir()
+    ownership = PathOwnership(gateway)
+    snapshot = ownership.snapshot()
+    assert ownership.describe(str(folder), snapshot)["status"] == "owned"
+    assert ownership.describe(str(folder / "missing-child"), snapshot)["status"] == "owned"
+    assert ownership.describe(str(sibling), snapshot)["status"] == "unassigned"
+    assert ownership.describe(str(root), snapshot)["status"] == "container"

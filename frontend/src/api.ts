@@ -20,13 +20,18 @@ export function ownershipText(ownership: PathOwnership): string {
   return '尚未归属摄像机'
 }
 
-export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function api<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch('/api' + path, {
     method, credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-CamMon-Request': '1' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
-  const data = await response.json()
+  let data
+  try { data = await response.json() }
+  catch {
+    throw Object.assign(new Error(`无法读取服务器响应（HTTP ${response.status}），请稍后重试`), { status: response.status })
+  }
   if (!response.ok) {
     const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail ?? '请求失败')
     const error = new Error(detail) as Error & { status: number }

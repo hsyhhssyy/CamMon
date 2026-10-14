@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ChevronLeft, ChevronRight, Folder, FolderOpen, Import, Search } from 'lucide-react'
-import { api, bytes, datetime, duration, ownershipText, type Device, type ImportFolders, type ImportItem, type ImportJob, type ImportReport } from './api'
-import OwnershipPanel from './OwnershipPanel'
+import { ChevronLeft, ChevronRight, FolderOpen, Import, Search } from 'lucide-react'
+import { api, bytes, datetime, duration, type Device, type ImportItem, type ImportJob, type ImportReport } from './api'
+import FolderBrowser from './FolderBrowser'
 import Thumbnail from './Thumbnail'
 
 const labels = { ready: '可导入', imported: '已导入', duplicate: '已存在', skipped: '已跳过', failed: '导入失败' }
@@ -12,7 +12,7 @@ export default function ImportPanel({ devices, onImported, failure }: {
   const [folder, setFolder] = useState('')
   const [deviceId, setDeviceId] = useState('')
   const [recursive, setRecursive] = useState(true)
-  const [browser, setBrowser] = useState<ImportFolders | null>(null)
+  const [browserOpen, setBrowserOpen] = useState(false)
   const [report, setReport] = useState<ImportReport | null>(null)
   const [job, setJob] = useState<ImportJob | null>(null)
   const [jobsLoaded, setJobsLoaded] = useState(false)
@@ -65,11 +65,6 @@ export default function ImportPanel({ devices, onImported, failure }: {
   }, [])
 
   function invalidate() { setReport(null) }
-  async function browse(path?: string) {
-    setBusy(true)
-    try { setBrowser(await api<ImportFolders>('/import/folders' + (path ? '?' + new URLSearchParams({ path }) : ''))) }
-    catch (error) { failure(error) } finally { setBusy(false) }
-  }
   async function preview(event: FormEvent) {
     event.preventDefault(); setBusy(true); invalidate()
     try { setReport(await api<ImportReport>('/import/preview', 'POST', { folder, device_id: deviceId, recursive })) }
@@ -85,7 +80,7 @@ export default function ImportPanel({ devices, onImported, failure }: {
   }
 
   return <>
-    <OwnershipPanel failure={failure}/>
+    {browserOpen && <FolderBrowser initialPath={folder || undefined} close={() => setBrowserOpen(false)} select={path => { setFolder(path); setBrowserOpen(false); invalidate() }} failure={failure}/>}
     {connectionError && <p className="inline-error import-connection" role="alert">进度暂时无法刷新，将自动重试：{connectionError}</p>}
     {job && <section className="panel import-results" aria-label="最近导入任务">
       <div className="panel-heading"><div><h2>{running ? '导入进度' : job.status === 'completed' ? '导入结果' : '导入中断'}</h2><p className="muted">{job.device_name} · {datetime(job.created_at)}</p><p className="muted import-job-path">{job.folder}{job.recursive ? ' · 包含子文件夹' : ''}</p></div><span className={`badge ${running || job.status === 'completed' ? 'green' : 'error'}`}>{running ? '正在导入' : job.status === 'completed' ? '已完成' : '已中断'}</span></div>
@@ -105,13 +100,7 @@ export default function ImportPanel({ devices, onImported, failure }: {
     <section className="panel settings-panel"><div className="panel-heading"><div><h2>导入已有录像</h2><p className="muted">把本地磁盘文件夹中的视频归入指定摄像机。</p></div><Import size={22}/></div>
       <form onSubmit={preview}>
         <p className="field-note">先将旧录像放到已配置的本地存储目录（默认 /data）下，再选择容器内的文件夹。可以包含多层子文件夹。</p>
-        <label>导入文件夹<div className="import-path"><input required disabled={disabled} value={folder} placeholder="/data/旧录像" onChange={event => { setFolder(event.target.value); invalidate() }}/><button type="button" className="secondary" disabled={disabled} onClick={() => browse()}><FolderOpen size={16}/>浏览文件夹</button></div></label>
-        {browser && <div className="folder-browser" role="region" aria-label="服务器文件夹">
-          <code>{browser.path}</code>
-          <p className="folder-ownership">{ownershipText(browser.ownership)}</p>
-          <div className="folder-actions"><button type="button" className="secondary" disabled={disabled || !browser.parent} onClick={() => browse(browser.parent!)}>上一级</button><button type="button" className="primary" disabled={disabled} onClick={() => { setFolder(browser.path); setBrowser(null); invalidate() }}>选择此文件夹</button></div>
-          <div className="folder-list">{browser.folders.map(child => <button type="button" key={child.path} disabled={disabled} onClick={() => browse(child.path)}><Folder size={16}/><span>{child.name}<small className="folder-ownership">{ownershipText(child.ownership)}</small></span></button>)}{!browser.folders.length && <p className="muted">没有可浏览的子文件夹</p>}</div>
-        </div>}
+        <label>导入文件夹<div className="import-path"><input required disabled={disabled} value={folder} placeholder="/data/旧录像" onChange={event => { setFolder(event.target.value); invalidate() }}/><button type="button" className="secondary" disabled={busy || running} onClick={() => setBrowserOpen(true)}><FolderOpen size={16}/>浏览文件夹</button></div></label>
         <label>归属摄像机<select required disabled={disabled} value={deviceId} onChange={event => { setDeviceId(event.target.value); invalidate() }}><option value="">请选择摄像机</option>{devices.map(device => <option key={device.id} value={device.id}>{device.name} · 保留 {device.retention_days} 天{device.enabled ? '' : ' · 已停用'}</option>)}</select></label>
         {!devices.length && <p className="field-note">请先在摄像机管理中添加设备。</p>}
         <label className="checkbox"><input type="checkbox" disabled={disabled} checked={recursive} onChange={event => { setRecursive(event.target.checked); invalidate() }}/>包含子文件夹</label>
