@@ -205,10 +205,57 @@ def test_import_browse_preview_commit_and_download(admin, gateway, device):
 def test_import_requires_authentication_and_write_header(client, gateway, device):
     body = {"folder": str(gateway.backend.root), "device_id": device["id"]}
     assert client.get("/api/import/folders").status_code == 401
+    assert client.get("/api/storage/ownership", params={"path": str(gateway.backend.root)}).status_code == 401
     assert client.get("/api/import/jobs").status_code == 401
     assert client.get("/api/import/jobs/missing").status_code == 401
     assert client.post("/api/import", json=body).status_code == 403
     assert client.post("/api/import", json=body, headers={"X-CamMon-Request": "1"}).status_code == 401
+
+
+def test_path_ownership_query_browse_and_import_conflicts(admin, gateway, device):
+    root = gateway.backend.root
+    folder = root / "history"
+    child = folder / "nested"
+    child.mkdir(parents=True)
+    source = child / FIRST.split("/")[-1]
+    source.write_bytes(b"history")
+    body = {"device_id": device["id"], "folder": str(folder)}
+    def query(path):
+        return admin.get("/api/storage/ownership", params={"path": str(path)})
+
+    assert query(folder).json()["status"] == "unassigned"
+    assert admin.post("/api/import/preview", json=body).status_code == 200
+    assert query(folder).json()["status"] == "unassigned"
+    job = admin.post("/api/import", json=body)
+    assert job.status_code == 202
+    assert query(folder).json()["owners"][0]["device_id"] == device["id"]
+    assert wait_for_import(admin, job.json()["id"])["report"]["imported"] == 1
+    assert query(source).json()["recording_ids"] == [1]
+    folders = admin.get("/api/import/folders").json()["folders"]
+    assert folders[0]["ownership"]["owners"][0]["device_name"] == device["name"]
+    other = gateway.create_device("另一台摄像机")
+    for path in (folder, child):
+        for endpoint in ("/api/import/preview", "/api/import"):
+            response = admin.post(endpoint, json={**body, "device_id": other["id"],
+                                                 "folder": str(path), "recursive": False})
+            assert response.status_code == 409 and device["name"] in response.json()["detail"]
+    assert gateway.query_files({"device_id": other["id"]})["count"] == 0
+    assert query(root.parent).status_code == 422
+    assert admin.get("/api/storage/ownership").status_code == 422
+    assert admin.post("/api/import", json={**body, "folder": str(root)}).status_code == 422
+
+
+def test_path_ownership_query_includes_camera_uploads(admin, gateway, device):
+    token = create(gateway, device)
+    gateway.close(token)
+    gateway.seal_candidates(gateway.recording(1)["last_write"] + 1900)
+    assert gateway.flush_one(1)
+    row = gateway.recording(1)
+    response = admin.get("/api/storage/ownership", params={"path": str(gateway.backend.root / row["remote_path"])})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "owned" and result["exists"] and result["recording_ids"] == [1]
+    assert result["owners"] == [{"device_id": device["id"], "device_name": device["name"]}]
 
 
 def test_import_only_duplicate_camera_video_links_copy(admin, gateway, device):

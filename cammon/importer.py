@@ -10,9 +10,8 @@ from pathlib import Path
 
 from cammon.media import MediaTools
 from cammon.naming import TZ, day_slices, is_minute_recording, recording_name
+from cammon.ownership import COPY_PREFIX, PathOwnership
 from cammon.storage import LocalBackend, file_hash, safe_key
-
-COPY_PREFIX = "import-copy:"
 
 
 def copy_key(remote_path: str) -> str:
@@ -57,11 +56,14 @@ class RecordingImporter:
 
     def folders(self, value: str | None = None) -> dict:
         path = self.folder(value)
+        ownership = PathOwnership(self.gateway)
+        snapshot = ownership.snapshot()
         children = [child for child in path.iterdir()
                     if not child.is_symlink() and child.is_dir() and not self.excluded(child)]
-        return {"root": str(self.root), "path": str(path),
+        return {"root": str(self.root), "path": str(path), "ownership": ownership.describe(str(path), snapshot),
                 "parent": str(path.parent) if path != self.root else None,
-                "folders": [{"name": child.name, "path": str(child)}
+                "folders": [{"name": child.name, "path": str(child),
+                             "ownership": ownership.describe(str(child), snapshot)}
                             for child in sorted(children, key=lambda child: child.name)]}
 
     def files(self, folder: Path, recursive: bool):
@@ -182,6 +184,7 @@ class RecordingImporter:
                 raise ValueError("摄像机中的录像发生变化，请重新预览")
             g.db.execute("BEGIN IMMEDIATE")
             try:
+                PathOwnership(g).claim(source.parent, device_id)
                 g.db.execute("UPDATE recordings SET sha256=?,thumbnail_path=coalesce(thumbnail_path,?),"
                              "thumbnail_error=CASE WHEN thumbnail_path IS NULL THEN ? ELSE thumbnail_error END "
                              "WHERE id=?", (digest, thumbnail, thumbnail_error, existing["id"]))
@@ -216,6 +219,7 @@ class RecordingImporter:
             device = g.device(device_id, enabled=False)
             g.db.execute("BEGIN IMMEDIATE")
             try:
+                PathOwnership(g).claim(source.parent, device_id)
                 first, second, _ = row["path"].split("/")
                 for directory in (first, f"{first}/{second}"):
                     g.db.execute("INSERT OR IGNORE INTO directories(device_id,path,modified_at) VALUES (?,?,?)",
@@ -241,6 +245,14 @@ class RecordingImporter:
              item_limit: int | None = sample_limit) -> dict:
         device = self.gateway.device(device_id, enabled=False)
         folder = self.folder(value)
+        ownership = PathOwnership(self.gateway)
+        with self.gateway.lock:
+            if self.gateway.backend is not self.backend:
+                raise ValueError("存储配置已改变，请重新预览")
+            if commit:
+                ownership.claim(folder, device_id)
+            else:
+                ownership.check(folder, device_id)
         cutoff = (datetime.now(TZ).date() - timedelta(days=device["retention_days"] - 1)).isoformat()
         self.backend.stopping = self.gateway.stopping
         result = dict(folder=str(folder), device_id=device_id, recursive=recursive, total=0,

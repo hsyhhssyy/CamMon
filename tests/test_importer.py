@@ -152,8 +152,8 @@ def test_repeat_overlapping_folder_and_cross_device_import_are_idempotent(gatewa
     nested = importer.scan(device["id"], str(history / "2025"), commit=True)
     assert nested["duplicates"] == 1
     other = gateway.create_device("另一台设备")
-    report = importer.scan(other["id"], str(history), commit=True)
-    assert report["duplicates"] == 2 and report["imported"] == 0
+    with pytest.raises(ValueError, match="已归属摄像机"):
+        importer.scan(other["id"], str(history), commit=True)
     assert gateway.query_files({})["count"] == 2
 
 
@@ -188,7 +188,9 @@ def test_folder_browser_and_scan_exclude_managed_files_and_symlinks(gateway, dev
     assert listing["parent"] is None
     assert [child["name"] for child in listing["folders"]] == ["旧录像"]
     assert importer.folders(str(history))["parent"] == str(root)
-    report = importer.scan(device["id"], str(root), commit=True)
+    with pytest.raises(ValueError, match="公共容器"):
+        importer.scan(device["id"], str(root), commit=True)
+    report = importer.scan(device["id"], str(history), commit=True)
     assert report["imported"] == 2 and report["skipped"] == 2
     for path in (outside, root / "outside-link", root / "originals", root / "archives"):
         with pytest.raises(ValueError):

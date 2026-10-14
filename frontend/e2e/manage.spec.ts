@@ -68,7 +68,7 @@ test('login, devices, conjunctive filters, download, settings and mobile layout'
     writeFileSync(join(history, 'notes.txt'), 'ignore this file')
     await page.getByRole('button', { name: '旧录像导入', exact: true }).click()
     await page.getByRole('button', { name: '浏览文件夹' }).click()
-    await page.getByRole('button', { name: '旧录像', exact: true }).click()
+    await page.getByRole('region', { name: '服务器文件夹' }).getByRole('button', { name: /^旧录像/ }).click()
     await page.getByRole('button', { name: '选择此文件夹' }).click()
     await expect(page.getByLabel('导入文件夹')).toHaveValue(history)
     await page.getByLabel('归属摄像机').selectOption({ label: '后院摄像机 · 保留 14 天' })

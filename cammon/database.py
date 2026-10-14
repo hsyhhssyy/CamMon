@@ -194,6 +194,8 @@ class Database:
                 # Persist related parents and credentials in the same remote
                 # transaction so a cold boot can load any committed batch.
                 if row:
+                    if table == "settings" and row["key"].startswith("folder-owner:"):
+                        include("devices", [json.loads(row["value"])["device_id"]])
                     if table == "devices":
                         credential = "credential:" + row["id"]
                         if self.one("SELECT key FROM settings WHERE key=?", (credential,)):

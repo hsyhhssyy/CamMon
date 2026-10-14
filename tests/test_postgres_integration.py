@@ -20,6 +20,7 @@ from pydantic import SecretStr
 from cammon.core import Gateway
 from cammon.importer import RecordingImporter, copy_key
 from cammon.metadata import MetadataBootstrapError, MetadataSynchronizer
+from cammon.ownership import OwnershipConflictError, PathOwnership
 from cammon.storage import LocalBackend
 from tests.test_gateway import FIRST, create
 
@@ -199,6 +200,30 @@ def test_imported_recordings_survive_gateway_restart_and_empty_runtime(pg_gatewa
             restored.close(token)
         assert RecordingImporter(restored).scan(device["id"], str(folder), commit=True)["duplicates"] == 1
         assert source.exists() and not list(restored.blobs.iterdir())
+    finally:
+        restored.shutdown()
+
+
+def test_empty_import_folder_ownership_survives_restart(pg_gateway, tmp_path):
+    g = pg_gateway
+    g.configure_storage({"protocol": "local", "address": str(g.backend.root)})
+    device = g.create_device("目录所属摄像机")
+    folder = g.backend.root / "history"
+    folder.mkdir()
+    assert RecordingImporter(g).scan(device["id"], str(folder), recursive=False, commit=True)["total"] == 0
+    drain(g)
+    settings = g.settings.model_copy(update={"data_dir": tmp_path / "empty-runtime",
+                                            "cache_dir": tmp_path / "empty-cache"})
+    g.shutdown()
+    restored = Gateway(settings)
+    try:
+        assert PathOwnership(restored).describe(str(folder))["owners"] == [
+            {"device_id": device["id"], "device_name": device["name"]}]
+        child = folder / "new-child"
+        child.mkdir()
+        other = restored.create_device("另一台")
+        with pytest.raises(OwnershipConflictError):
+            RecordingImporter(restored).scan(other["id"], str(child), commit=True)
     finally:
         restored.shutdown()
 

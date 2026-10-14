@@ -6,10 +6,19 @@ export type MetadataStatus = { configured: boolean; connected: boolean; schema: 
 export type Status = { storage_configured: boolean; cache_bytes: number; cache_available_bytes: number; cache_limit_bytes: number; cache_error: string | null; pending_files: number; writing_handles: number; protocol_error: string | null; worker_error: string | null; alerts: { id: number; path: string; error: string }[]; jobs: Job[]; metadata: MetadataStatus; discovery: { mode: 'pending' | 'internal' | 'external' | 'disabled'; message: string } }
 export type Statistics = { count: number; bytes: number; groups: { day: string; kind: string; count: number; bytes: number }[] }
 export type FilePage = { items: Recording[]; count: number; bytes: number }
-export type ImportFolders = { root: string; path: string; parent: string | null; folders: { name: string; path: string }[] }
+export type PathOwnership = { root: string; path: string; exists: boolean; kind: 'directory' | 'file' | 'missing'; status: 'owned' | 'unassigned' | 'container' | 'conflict'; owners: { device_id: string; device_name: string }[]; bindings: { path: string; device_id: string; source: string }[]; recording_ids: number[] }
+export type ImportFolders = { root: string; path: string; parent: string | null; ownership: PathOwnership; folders: { name: string; path: string; ownership: PathOwnership }[] }
 export type ImportItem = { path: string; status: 'ready' | 'imported' | 'duplicate' | 'skipped' | 'failed'; reason?: string | null; day?: string; channel?: string; size?: number; expired?: boolean; start?: number; end?: number; duration?: number | null; thumbnail_key?: string }
 export type ImportReport = { folder: string; device_id: string; recursive: boolean; total: number; importable: number; imported: number; duplicates: number; copies: number; skipped: number; failed: number; bytes: number; expired: number; items: ImportItem[]; preview_id?: string; offset?: number; limit?: number }
 export type ImportJob = { id: string; folder: string; device_id: string; device_name: string; recursive: boolean; status: 'running' | 'completed' | 'failed'; created_at: number; finished_at: number | null; total_files: number | null; current_path: string | null; report: ImportReport | null; error: string | null }
+
+export function ownershipText(ownership: PathOwnership): string {
+  const names = ownership.owners.map(owner => owner.device_name).join('、')
+  if (ownership.status === 'owned') return `归属摄像机：${names}`
+  if (ownership.status === 'conflict') return `历史归属冲突：${names}`
+  if (ownership.status === 'container') return `公共父目录，子目录或文件归属：${names}`
+  return '尚未归属摄像机'
+}
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch('/api' + path, {

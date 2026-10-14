@@ -123,6 +123,8 @@ class Gateway:
             if previous and any(config.get(k) != previous.get(k) for k in ("protocol", "address", "nfs_version")):
                 if self.db.one("SELECT id FROM recordings WHERE state!='deleted' LIMIT 1"):
                     raise ValueError("已有录像时不能更换真实存储地址；请先完成手工迁移")
+                if self.db.one("SELECT key FROM settings WHERE key LIKE 'folder-owner:%' LIMIT 1"):
+                    raise ValueError("已有目录归属时不能更换真实存储地址；请先完成手工迁移")
             backend = make_backend(config, self.settings.network_timeout_seconds)
             # Credential changes are safe; every in-flight task retains its own backend instance.
             saved = {k: v for k, v in config.items() if k != "password"}

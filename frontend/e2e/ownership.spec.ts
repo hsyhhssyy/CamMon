@@ -1,0 +1,50 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { test, expect } from './fixtures'
+
+test('query imported file and folder ownership and reject a second camera', async ({ page }) => {
+  await page.goto('/')
+  await page.getByLabel('密码', { exact: true }).fill('browser-test-password')
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '存储总览', exact: true })).toBeVisible()
+  const devices = await (await page.request.get('/api/devices')).json()
+  const listing = await (await page.request.get('/api/import/folders')).json()
+  const folder = join(listing.root, 'history')
+  const source = join(folder, '01_20251008080000_20251008080100.mp4')
+  mkdirSync(folder)
+  writeFileSync(source, 'historical-video')
+  const otherResponse = await page.request.post('/api/devices', {
+    headers: { 'X-CamMon-Request': '1' }, data: { name: '另一台摄像机' },
+  })
+  expect(otherResponse.status()).toBe(201)
+  const other = await otherResponse.json()
+  await page.reload()
+  await page.getByRole('button', { name: '旧录像导入', exact: true }).click()
+  const query = page.getByRole('region', { name: '文件归属查询', exact: true })
+  await query.getByLabel('查询路径').fill(source)
+  await query.getByRole('button', { name: '查询归属', exact: true }).click()
+  await expect(query.getByRole('status')).toContainText('尚未归属摄像机')
+  await page.getByLabel('导入文件夹').fill(folder)
+  await page.getByLabel('归属摄像机').selectOption(devices[0].id)
+  await page.getByRole('button', { name: '预览导入', exact: true }).click()
+  await page.getByRole('button', { name: '开始导入', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '导入结果', exact: true })).toBeVisible()
+  await query.getByRole('button', { name: '查询归属', exact: true }).click()
+  await expect(query.getByRole('status')).toContainText(`归属摄像机：${devices[0].name}`)
+  await expect(query.getByRole('status')).toContainText('已登记录像或录像副本关联')
+  await query.getByLabel('查询路径').fill(folder)
+  await query.getByRole('button', { name: '查询归属', exact: true }).click()
+  await expect(query.getByRole('status')).toContainText(`归属摄像机：${devices[0].name}`)
+  await page.getByRole('button', { name: '浏览文件夹', exact: true }).click()
+  const browser = page.getByRole('region', { name: '服务器文件夹', exact: true })
+  await expect(browser.getByRole('button', { name: /history/ })).toContainText(`归属摄像机：${devices[0].name}`)
+  await page.getByLabel('归属摄像机').selectOption(other.id)
+  await page.getByRole('button', { name: '预览导入', exact: true }).click()
+  await expect(page.locator('.toast.error')).toContainText(`已归属摄像机“${devices[0].name}”`)
+  const rejected = await page.request.post('/api/import', {
+    headers: { 'X-CamMon-Request': '1' }, data: { folder, device_id: other.id, recursive: false },
+  })
+  expect(rejected.status()).toBe(409)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+})

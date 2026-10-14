@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ChevronLeft, ChevronRight, Folder, FolderOpen, Import, Search } from 'lucide-react'
-import { api, bytes, datetime, duration, type Device, type ImportFolders, type ImportItem, type ImportJob, type ImportReport } from './api'
+import { api, bytes, datetime, duration, ownershipText, type Device, type ImportFolders, type ImportItem, type ImportJob, type ImportReport } from './api'
+import OwnershipPanel from './OwnershipPanel'
 import Thumbnail from './Thumbnail'
 
 const labels = { ready: '可导入', imported: '已导入', duplicate: '已存在', skipped: '已跳过', failed: '导入失败' }
@@ -84,6 +85,7 @@ export default function ImportPanel({ devices, onImported, failure }: {
   }
 
   return <>
+    <OwnershipPanel failure={failure}/>
     {connectionError && <p className="inline-error import-connection" role="alert">进度暂时无法刷新，将自动重试：{connectionError}</p>}
     {job && <section className="panel import-results" aria-label="最近导入任务">
       <div className="panel-heading"><div><h2>{running ? '导入进度' : job.status === 'completed' ? '导入结果' : '导入中断'}</h2><p className="muted">{job.device_name} · {datetime(job.created_at)}</p><p className="muted import-job-path">{job.folder}{job.recursive ? ' · 包含子文件夹' : ''}</p></div><span className={`badge ${running || job.status === 'completed' ? 'green' : 'error'}`}>{running ? '正在导入' : job.status === 'completed' ? '已完成' : '已中断'}</span></div>
@@ -104,14 +106,16 @@ export default function ImportPanel({ devices, onImported, failure }: {
       <form onSubmit={preview}>
         <p className="field-note">先将旧录像放到已配置的本地存储目录（默认 /data）下，再选择容器内的文件夹。可以包含多层子文件夹。</p>
         <label>导入文件夹<div className="import-path"><input required disabled={disabled} value={folder} placeholder="/data/旧录像" onChange={event => { setFolder(event.target.value); invalidate() }}/><button type="button" className="secondary" disabled={disabled} onClick={() => browse()}><FolderOpen size={16}/>浏览文件夹</button></div></label>
-        {browser && <div className="folder-browser" aria-label="服务器文件夹">
+        {browser && <div className="folder-browser" role="region" aria-label="服务器文件夹">
           <code>{browser.path}</code>
+          <p className="folder-ownership">{ownershipText(browser.ownership)}</p>
           <div className="folder-actions"><button type="button" className="secondary" disabled={disabled || !browser.parent} onClick={() => browse(browser.parent!)}>上一级</button><button type="button" className="primary" disabled={disabled} onClick={() => { setFolder(browser.path); setBrowser(null); invalidate() }}>选择此文件夹</button></div>
-          <div className="folder-list">{browser.folders.map(child => <button type="button" key={child.path} disabled={disabled} onClick={() => browse(child.path)}><Folder size={16}/>{child.name}</button>)}{!browser.folders.length && <p className="muted">没有可浏览的子文件夹</p>}</div>
+          <div className="folder-list">{browser.folders.map(child => <button type="button" key={child.path} disabled={disabled} onClick={() => browse(child.path)}><Folder size={16}/><span>{child.name}<small className="folder-ownership">{ownershipText(child.ownership)}</small></span></button>)}{!browser.folders.length && <p className="muted">没有可浏览的子文件夹</p>}</div>
         </div>}
         <label>归属摄像机<select required disabled={disabled} value={deviceId} onChange={event => { setDeviceId(event.target.value); invalidate() }}><option value="">请选择摄像机</option>{devices.map(device => <option key={device.id} value={device.id}>{device.name} · 保留 {device.retention_days} 天{device.enabled ? '' : ' · 已停用'}</option>)}</select></label>
         {!devices.length && <p className="field-note">请先在摄像机管理中添加设备。</p>}
         <label className="checkbox"><input type="checkbox" disabled={disabled} checked={recursive} onChange={event => { setRecursive(event.target.checked); invalidate() }}/>包含子文件夹</label>
+        <p className="field-note">每个导入文件夹及其子目录只能归属一台摄像机，取消递归扫描也不会解除归属。预览仅检查；开始导入时保存目录归属，归档清理视频后仍保留。已有其他摄像机归属的父子目录会阻止导入。</p>
         <p className="field-note">支持 00_20251008080239_20251008082813.mp4 和小米录像 30M33S_1753536633.mp4。前者按文件名识别编号和起止时间；小米录像编号为 00，开始时间取时间戳，结束时间按实际视频时长计算。时间按北京时间显示；不符合命名的文件会跳过。</p>
         <p className="field-note">目标摄像机已有同名录像时，会核对文件大小和内容。相同副本只归档一次，两处原文件都在成功归档后清理；同名但内容不同的文件会保留并显示原因。</p>
         <div className="notice"><Import size={19}/><p>导入会直接管理原位置的文件，无需复制。保留天数从录像日期计算；超期片段在下一次每日归档任务中生成 60 倍速视频，成功归档后删除原文件。导入后请勿移动、改名或修改这些文件。</p></div>

@@ -7,6 +7,7 @@ import time
 import uuid
 
 from cammon.importer import RecordingImporter
+from cammon.ownership import PathOwnership
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class ImportJobs:
                 if (active["device_id"], active["folder"], active["recursive"]) == (device_id, folder, recursive):
                     return copy.deepcopy(active)
                 raise ImportBusyError("已有导入任务正在运行，请在旧录像导入页面查看进度，完成后再开始新任务")
+            # Reserve synchronously so conflicting submissions fail before a
+            # worker can partially adopt files from this tree.
+            PathOwnership(self.gateway).claim(importer.folder(folder), device_id)
             job = dict(id=uuid.uuid4().hex, device_id=device_id, device_name=device["name"], folder=folder,
                        recursive=recursive, status="running", created_at=time.time(), finished_at=None,
                        total_files=None, current_path=None, report=None, error=None)

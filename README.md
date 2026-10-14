@@ -14,14 +14,14 @@ PostgreSQL 保存元数据。运行时的配置、索引和待同步变更全部
 
 ### 使用 GHCR 公开镜像
 
-将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.10`，支持 `linux/amd64` 和 `linux/arm64`。0.1.10 新增录像及归档首帧缩略图、完整信息卡片和每页 25 个文件的按需导入预览；0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
+将 [compose.ghcr.yaml](compose.ghcr.yaml) 和 [.env.ghcr.example](.env.ghcr.example) 放到 NAS 的同一目录即可，不需要源码或本地构建，也无需登录 GHCR。默认固定使用 `ghcr.io/hsyhhssyy/cammon:0.1.11`，支持 `linux/amd64` 和 `linux/arm64`。0.1.11 新增 H.265/HEVC 浏览器端兼容播放、文件归属查询和导入目录独占绑定；0.1.10 新增录像及归档首帧缩略图、完整信息卡片和每页 25 个文件的按需导入预览；0.1.8 新增小米录像命名及目录支持、实际时长识别和可恢复查看的后台导入进度；0.1.7 新增在线播放、旧录像导入及归档后的虚拟文件记录；0.1.6 新增本地磁盘真实存储，默认将 `/volume1/WebCam` 挂载到 `/data`；从 0.1.5 起支持与 NAS 已有 NetBIOS 服务共存。镜像页面见 [GitHub Packages](https://github.com/hsyhhssyy/CamMon/pkgs/container/cammon)。
 
 ```bash
 test -f .env || cp .env.ghcr.example .env
 chmod 600 .env
 # 首次部署且没有现有密钥时生成；已有 .env 中的密钥可直接沿用。
 # 这个临时容器只运行生成命令，不启动摄像机服务，也不需要数据库。
-docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.10 \
+docker run --rm --entrypoint python ghcr.io/hsyhhssyy/cammon:0.1.11 \
   -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 # 编辑 .env，填写 CAMMON_ADMIN_PASSWORD、CAMMON_POSTGRES_DSN、CAMMON_SECRET_KEY
 # 将生成的密钥保存为 CAMMON_SECRET_KEY，更新或重启时保持相同。
@@ -47,7 +47,7 @@ NAS 的 NetBIOS UDP 端口无法释放时，使用默认 `CAMMON_NETBIOS_MODE=au
 
 共存时使用 NAS 现有的发现名称或直接填写 NAS IP，不会新增独立的 CAMMON 广播名称，也不修改 NAS 的发现服务。NAS 是否广播 SMB 服务器名称、摄像机能否枚举该名称，需要实机确认；直接通过 IP 和生成的共享名接入不依赖 UDP 发现。TCP 139/445 仍须独占。
 
-从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.10` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
+从旧版本升级时保留 `.env` 中的密码、数据库连接和原密钥，更新 Compose 文件，将 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.11` 后执行 `pull` 和 `up -d`。仅 `restart` 不会更换镜像。源码部署预检可指定 `python3 scripts/check_deployment.py --netbios-mode external`。
 
 更新镜像时执行同一组 `pull` 和 `up -d` 命令；查看状态用 `docker compose -f compose.ghcr.yaml ps`，停止服务用 `docker compose -f compose.ghcr.yaml down`。更新重建容器会丢弃临时录像及未同步的内存变更，符合临时缓存约定。
 
@@ -76,11 +76,11 @@ docker compose logs -f cammon
 [Publish to GHCR](.github/workflows/publish.yml) 在推送 `v` 开头的语义化版本标签或从 GitHub Actions 手动运行时发布镜像。先将对应版本的代码和工作流提交并推送到 GitHub，再创建一个新版本标签，例如：
 
 ```bash
-git tag v0.1.11
-git push origin v0.1.11
+git tag v0.1.12
+git push origin v0.1.12
 ```
 
-镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.11` 发布 `0.1.11`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.11-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
+镜像地址采用小写仓库名，当前为 `ghcr.io/hsyhhssyy/cammon`。`v0.1.12` 发布 `0.1.12`、`0.1`、`latest` 和 `sha-完整提交哈希` 标签；`v0.1.12-rc.1` 只发布预发布版本和 SHA 标签，不更新稳定版本标签。手动运行发布 `edge` 和 SHA 标签。`latest` 指最近一次发布的稳定版本；NAS 默认固定版本，更新时修改 `CAMMON_IMAGE` 后执行 `pull` 和 `up -d`。
 
 发布前复用 [CamMon checks](.github/workflows/ci.yml)，执行 Python、PostgreSQL、前端构建、浏览器和真实协议测试。amd64 与 arm64 分别使用原生 Linux runner 测试、构建，并复用 BuildKit 缓存；全部检查通过后才上传 `production` 镜像，最终合并为支持 `linux/amd64` 和 `linux/arm64` 的镜像。PR 和普通分支推送执行检查；发布流程不重复触发另一套标签检查。
 
@@ -98,7 +98,7 @@ git push origin v0.1.11
 
 CI 登录 GHCR 使用 Actions 自带的 `GITHUB_TOKEN`，仅发布任务授予 `packages: write`，可见性预检只授予 `packages: read`，无需另存发布用的 PAT；CI 使用临时测试数据库，不需要部署环境的 PostgreSQL 连接和凭据。若同名包已存在，须在包的 “Manage Actions access” 中允许此仓库写入。按用户最新要求使用公开包：上传 digest 后验证 Public，再创建下载标签，发布后验证实际可见性及匿名多架构镜像访问。NAS 拉取公开镜像无需登录；参见 [GitHub Container registry 文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.10`，使用原 Compose 拉取启动：
+NAS 上直接使用公开镜像见前文“使用 GHCR 公开镜像”。已有源码构建部署也可以将 `.env` 中的 `CAMMON_IMAGE` 改为 `ghcr.io/hsyhhssyy/cammon:0.1.11`，使用原 Compose 拉取启动：
 
 ```bash
 python3 scripts/check_deployment.py
@@ -151,11 +151,15 @@ PostgreSQL 保存 `settings`、`devices`、`directories`、`recordings`、`archi
 
 在“录像文件”列表点击播放按钮，可直接播放普通录像或 60× 归档，支持暂停、拖动进度、全屏和 0.5×–4× 播放速度。归档视频本身已压缩时间轴，1× 播放即为原录像的 60 倍速。播放通过登录后的 `/api/files/{id}/stream` 接口按字节范围读取，适用于本地缓存及本地磁盘、SMB/NFS 后端，不需要先下载整个文件。关闭播放器会停止播放和加载；下载按钮继续提供原文件。
 
-在线播放使用浏览器支持的 MP4 编码，不自动转码。H.264 归档可在支持该编码的浏览器中播放；原录像能否播放取决于摄像机编码及浏览器支持。未写完、损坏或编码不兼容时页面提示重试或下载后使用本地播放器。已删除内容的虚拟原片不提供播放，须选择对应的归档。
+在线播放优先使用浏览器原生播放器；原生解码失败或只播放出音频时，自动切换为浏览器端 WebAssembly 软件解码，支持 H.265/HEVC、H.264 及 AAC、Opus、MP3、PCM 音频。两种模式均通过带登录认证的 HTTP Range 接口读取原录像；兼容模式每次请求最多 1 MiB 并保留短播放缓冲，支持暂停、拖动、倍速、音量和全屏，关闭播放器停止读取。服务器不转码、不生成播放副本，下载仍为原文件。解码资源随镜像提供，运行时不依赖外部 CDN，也可在 NAS 的普通 HTTP 页面上使用；4K 软件解码流畅度取决于观看设备的性能。未写完、损坏或软件解码仍失败时提示重试或下载。已删除内容的虚拟原片不提供播放，须选择对应的归档。
 
 ### 导入旧录像
 
 使用本地磁盘存储时，可将历史录像放到 NAS 挂载目录中的独立文件夹，例如 `/volume1/WebCam/旧录像`（容器内为 `/data/旧录像`），然后在管理页“旧录像导入”中浏览或填写容器内路径，选择归属摄像机，预览后点击“开始导入”。默认包含所有子文件夹，也可取消递归扫描。已停用的摄像机同样可以接收历史数据。
+
+“旧录像导入”页面的“文件归属查询”可填写 `/data` 下任意视频、文件或文件夹的容器内绝对路径，查看摄像机名称、是否已登记录像或副本，以及路径是否仍在磁盘上。查询涵盖摄像机写入的 `originals/设备ID/`、`archives/设备ID/`、旧录像导入和关联副本；文件夹浏览器也显示目录归属。未入库的文件若位于已绑定目录内，会显示按目录归属，并注明尚未登记为录像。归档清理后仍可查询保存的归属。查询接口为需要登录的 `GET /api/storage/ownership?path=/data/旧录像/视频.mp4`，返回 `status`（`owned` 已归属、`unassigned` 未归属、`container` 公共父目录、`conflict` 历史归属冲突）、`owners`（摄像机 ID 和名称）、`kind`、`exists` 及关联录像信息。
+
+一个导入文件夹及其全部子目录只能归属一台摄像机。预览只检查归属，点击“开始导入”时立即保存目录绑定，即使目录为空、文件处理失败或取消递归扫描也保留绑定；视频归档或副本清理后绑定继续保留，并随元数据同步到 PostgreSQL、在重启后恢复。另一个摄像机导入相同目录、它的子目录或包含它的父目录时，预览和提交均返回 HTTP 409，不会部分导入。已有版本保存的录像和副本关联也参与检查；若历史数据已经把同一目录关联给多个摄像机，查询显示冲突并阻止继续导入，保留现有数据。`/data` 根目录是公共容器，导入时必须选择独立子目录；不同摄像机可以分别使用互不包含的同级目录。
 
 点击“开始导入”后，服务端创建后台任务，先统计文件数量，再逐个处理。页面显示已处理 / 总文件数、当前文件和导入、重复、跳过、失败统计；切换页面、刷新或关闭浏览器不会取消任务，重新打开“旧录像导入”会自动恢复最近任务的进度或最终结果。进度查询失败时页面自动重试。一次只执行一个导入任务，重复提交同一运行中的任务会返回原任务。任务状态和最近 10 次结果保存在当前服务进程内；容器或服务重启后不保留任务进度，也不自动续跑，重新导入同一目录会跳过已导入文件。
 
@@ -235,7 +239,7 @@ flowchart LR
 
 需要备份的是 PostgreSQL、真实存储中的录像和部署配置中的密钥。本地磁盘模式应备份 `/data` 对应的 NAS 目录；SMB/NFS 模式备份远程录像目录。无需保留临时录像缓存。需要选择 SSD 临时录像路径时，可在 Compose override 中仅为 `/cache` 绑定 scratch 目录；其中录像仍按重启时丢弃处理。元数据和 Samba 运行文件保持内存 / tmpfs 模式。
 
-已有录像时禁止直接切换存储协议、地址或 NFS 版本。第一版没有自动迁移工具；更换地址需要独立安排数据与索引迁移。单纯更新账号密码不会迁移或重复统计数据。
+已有录像或导入目录归属时禁止直接切换存储协议、地址或 NFS 版本。第一版没有自动迁移工具；更换地址需要独立安排数据与索引迁移。单纯更新账号密码不会迁移或重复统计数据。
 
 健康检查：`GET /healthz`。API 文档：`/docs`；管理接口位于 `/api`，需要登录 Cookie，写请求须带 `X-CamMon-Request: 1`。管理端默认用于局域网；经 HTTPS 反向代理部署可设置 `CAMMON_COOKIE_SECURE=true`（使用 Compose 时在 environment 中加入）。
 

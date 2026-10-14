@@ -1,5 +1,7 @@
 """Isolated browser-test server; never seeds or mutates a production data directory."""
 import os
+import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -47,4 +49,37 @@ gateway.db.execute("UPDATE recordings SET duration=1 WHERE id=?", (archive_id,))
 gateway.backend = LocalBackend(directory / "storage")
 gateway.thumbnails.save(1, gateway.blob(1))
 gateway.thumbnails.save(archive_id, gateway.blob(archive_id))
+if os.environ.get("CAMMON_BROWSER_HEVC") == "1":
+    # Reproduce browsers which accept the Opus audio track but cannot decode
+    # HEVC video. Match SIDX-only fragments to exercise browser seek indexing.
+    hevc = directory / "hevc.mp4"
+    sample = os.environ.get("CAMMON_BROWSER_HEVC_SAMPLE")
+    if sample:
+        shutil.copyfile(sample, hevc)
+    else:
+        subprocess.run([
+            "ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=10",
+            "-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000", "-t", "60",
+            "-c:v", "libx265", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-x265-params", "pools=1:frame-threads=1:log-level=error:keyint=10",
+            "-tag:v", "hvc1", "-c:a", "libopus", "-movflags", "+empty_moov+frag_keyframe+global_sidx+default_base_moof",
+            str(hevc),
+        ], check=True)
+        # Match the camera's SIDX-only fragmented MP4, without FFmpeg's MFRA.
+        with hevc.open("r+b") as stream:
+            position = 0
+            while header := stream.read(8):
+                size, kind = struct.unpack(">I4s", header)
+                if kind == b"mfra":
+                    stream.truncate(position)
+                    break
+                if size < 8:
+                    break
+                position += size
+                stream.seek(position)
+    token = gateway.open(device["id"], "day/97_20251008080000_20251008080100.mp4", os.O_CREAT | os.O_RDWR)
+    gateway.close(token)
+    hevc_id = gateway.db.one("SELECT id FROM recordings WHERE channel='97'")["id"]
+    shutil.copyfile(hevc, gateway.blob(hevc_id))
+    gateway.db.execute("UPDATE recordings SET size=?,duration=60 WHERE id=?", (hevc.stat().st_size, hevc_id))
 app = create_app(settings, gateway)

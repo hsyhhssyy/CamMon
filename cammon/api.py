@@ -21,6 +21,7 @@ from cammon.core import Gateway
 from cammon.import_jobs import ImportBusyError, ImportJobs
 from cammon.import_previews import ImportPreviews
 from cammon.importer import RecordingImporter
+from cammon.ownership import OwnershipConflictError, PathOwnership
 from cammon.rpc import Server
 from cammon.samba import SambaManager
 from cammon.security import password_matches
@@ -157,7 +158,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             if owns_gateway:
                 g.shutdown()
 
-    app = FastAPI(title="CamMon", version="0.1.10", lifespan=lifespan)
+    app = FastAPI(title="CamMon", version="0.1.11", lifespan=lifespan)
 
     @app.middleware("http")
     async def browser_protection(request: Request, call_next):
@@ -191,6 +192,10 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     @app.exception_handler(ValueError)
     async def value_error(request, exc):
         return JSONResponse({"detail": str(exc)}, 422)
+
+    @app.exception_handler(OwnershipConflictError)
+    async def ownership_conflict(request, exc):
+        return JSONResponse({"detail": str(exc)}, 409)
 
     @app.post("/api/auth/login")
     def login(data: Login, response: Response, g: Gateway = Depends(get_gateway)):
@@ -276,6 +281,10 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     @app.get("/api/import/folders")
     def import_folders(path: str | None = None, g: Gateway = auth):
         return RecordingImporter(g).folders(path)
+
+    @app.get("/api/storage/ownership")
+    def path_ownership(path: str = Query(min_length=1, max_length=4096), g: Gateway = auth):
+        return PathOwnership(g).describe(path)
 
     @app.post("/api/import/preview")
     def preview_import(data: ImportRequest, request: Request, g: Gateway = auth):

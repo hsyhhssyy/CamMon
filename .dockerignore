@@ -15,6 +15,7 @@ secrets
 cammon/_nfs*
 frontend/node_modules
 frontend/dist
+frontend/public/libmedia/*/js
 frontend/*.tsbuildinfo
 data
 cache
